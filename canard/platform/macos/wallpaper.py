@@ -1,6 +1,7 @@
 import objc
 from AppKit import (
     NSNotificationCenter,
+    NSScreen,
     NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSWindowCollectionBehaviorIgnoresCycle,
     NSWindowCollectionBehaviorStationary,
@@ -42,6 +43,23 @@ def observe_occlusion(widget, callback):
         NSWindowDidChangeOcclusionStateNotification, window, None, on_change
     )
     return token, on_change
+
+
+def is_visible(widget) -> bool:
+    return bool(_ns_window(widget).occlusionState() & NSWindowOcclusionStateVisible)
+
+
+def display_id_for(screen) -> int | None:
+    """QScreen → CGDirectDisplayID (Canard.saver ekranını bununla bildirir). Qt ekran adı NSScreen.localizedName'dir;
+    aynı adlı ekranlarda konum (Qt sol-üst, Cocoa sol-alt) ile ayırt edilir."""
+    geometry = screen.geometry()
+    matches = [s for s in NSScreen.screens() if s.localizedName() == screen.name()]
+    if len(matches) > 1:
+        matches = [s for s in matches if int(s.frame().origin.x) == geometry.x()
+                   and int(s.frame().size.width) == geometry.width()] or matches
+    if not matches:
+        return None
+    return int(matches[0].deviceDescription()["NSScreenNumber"])
 
 
 def remove_observer(token) -> None:

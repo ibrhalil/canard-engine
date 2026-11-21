@@ -8,7 +8,7 @@ Web tabanlı içerikleri (uzak URL, yerel production build, dev sunucusu, paketl
 
 ## Durum
 
-macOS: Faz 1 (web renderer) ve Faz 4a (sistem sesi) tamamlandı; Faz 2a (duvar kağıdı) kapanış aşamasında. Faz planı ve tüm kararlar: [PLAN.md](PLAN.md) · Gereksinimler: [docs/PROMPT.md](docs/PROMPT.md)
+macOS: Faz 1 (web renderer), Faz 2a (duvar kağıdı), Faz 3a (ekran koruyucu) ve Faz 4a (sistem sesi) tamamlandı. Faz planı ve tüm kararlar: [PLAN.md](PLAN.md) · Gereksinimler: [docs/PROMPT.md](docs/PROMPT.md)
 
 ## Hızlı başlangıç
 
@@ -20,6 +20,7 @@ uv run canard --mode wallpaper --boot-file tools/mscillus-boot-system.js   # msc
 ```
 
 - **Sistem sesi (macOS 14.2+):** içerik `getDisplayMedia({audio: true})` istediğinde motor sistem sesini verir; mscillus'un "Sistem sesi" kartı değişiklik gerekmeden çalışır.
+- **Ekran koruyucu:** `Canard.saver` macOS'un gerçek ekran koruyucusu olarak duvar kağıdı içeriğini kilit ekranında da gösterir (`native/macos-saver/build.sh --open`); alternatif: `--screensaver-after` ile Canard'ın kendi boşta tam ekranı.
 - **Duvar kağıdı kısayolları:** `⌃⌥⌘←/→` içeriğe ←/→ tuşu gönderir, `⌃⌥⌘↑` etkileşimli modu açar/kapatır. Örtülünce (tam ekran uygulama) içerik duraklatılır.
 
 Tüm komutlar, örnekler ve sorun giderme: **[docs/KULLANIM.md](docs/KULLANIM.md)** · Yetki ve izinler: **[docs/IZINLER.md](docs/IZINLER.md)**

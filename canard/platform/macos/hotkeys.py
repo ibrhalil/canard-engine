@@ -7,6 +7,7 @@ Erişilebilirlik izni istemez ve NSApplication olay döngüsünde (Qt Cocoa) tes
 
 import ctypes
 import ctypes.util
+import logging
 from collections.abc import Callable
 
 _carbon = ctypes.CDLL(ctypes.util.find_library("Carbon"))
@@ -49,6 +50,7 @@ DEFAULT_BINDINGS = {
     "prev": (KEY_LEFT, _HYPER, "⌃⌥⌘←"),
     "next": (KEY_RIGHT, _HYPER, "⌃⌥⌘→"),
     "toggle_interactive": (KEY_UP, _HYPER, "⌃⌥⌘↑"),
+    "screensaver_now": (KEY_DOWN, _HYPER, "⌃⌥⌘↓"),
 }
 
 _carbon.GetApplicationEventTarget.restype = ctypes.c_void_p
@@ -122,5 +124,5 @@ class HotkeyRegistry:
                 try:
                     callback()
                 except Exception as error:
-                    print(f"[hotkey] {error!r}", flush=True)
+                    logging.getLogger("canard.hotkey").exception("kısayol işleyicisi hata verdi: %r", error)
         return 0

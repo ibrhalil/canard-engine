@@ -1,16 +1,21 @@
 import argparse
+import logging
 import sys
 
 from PySide6.QtCore import QCoreApplication
 
+import canard
+from canard.app import logs
 from canard.app.application import CanardApp
 from canard.content.sources import SourceError, from_build, from_url, resolve_load_url, validate
+
+log = logging.getLogger("canard")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="canard", description="Canard — CANvas boARD engine")
     parser.add_argument("--mode", choices=["preview", "wallpaper", "screensaver"], default="preview",
-                        help="Çalışma modu (wallpaper/screensaver Faz 2a/3a'da)")
+                        help="preview: pencere · wallpaper: canlı duvar kağıdı · screensaver: yalnız ekran koruyucu")
     parser.add_argument("--url", help="Uzak veya dev sunucu URL'si (http/https)")
     parser.add_argument("--path", help="Yerel production build klasörü (index.html içeren)")
     parser.add_argument("--source", help="Kayıtlı kaynak kimliği")
@@ -22,7 +27,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--clear-boot", action="store_true", help="Kaynağa bağlı boot script'i kaldır")
     parser.add_argument("--no-system-audio", action="store_true",
                         help="Sistem sesini içeriğe verme (getDisplayMedia ses köprüsünü kapat)")
+    parser.add_argument("--screensaver-after", type=float, metavar="DK",
+                        help="Canard'ın kendi boşta tam ekranı: bu kadar dakika boşta kalınca (wallpaper ya da "
+                             "screensaver modunda). Gerçek sistem ekran koruyucusu için Canard.saver, bkz. KULLANIM")
+    parser.add_argument("--no-saver-stream", action="store_true",
+                        help="Canard.saver'a (macOS ekran koruyucu) kare yayınlama")
+    parser.add_argument("--saver-fps", type=int, metavar="N",
+                        help="Canard.saver yayın kare hızı (varsayılan 30; yetişilemezse kendiliğinden düşer)")
     parser.add_argument("--settings", help="Ayar dosyası yolu (varsayılan: uygulama veri dizini)")
+    parser.add_argument("--log-level", choices=list(logs.LEVELS), default="info",
+                        help="Terminal log düzeyi (varsayılan: info)")
+    parser.add_argument("-v", "--verbose", action="store_const", const="debug", dest="log_level",
+                        help="Ayrıntılı log (--log-level debug)")
+    parser.add_argument("--log-file", nargs="?", const="", metavar="YOL",
+                        help="Logu dosyaya da yaz (her zaman debug düzeyinde); yol verilmezse "
+                             "~/Library/Logs/Canard/canard.log")
     return parser
 
 
@@ -30,7 +49,7 @@ def _register_url(app: CanardApp, url: str):
     source = app.registry.find(url=url)
     if source is None:
         source = app.registry.add(from_url(url))
-        print(f"Kaynak eklendi: {source.id} ({source.name})")
+        log.info("kaynak eklendi: %s (%s)", source.id, source.name)
     app.registry.set_active(source.id)
     return source
 
@@ -40,14 +59,14 @@ def _register_build(app: CanardApp, path: str):
     errors = validate(source)
     if errors:
         for error in errors:
-            print(error, file=sys.stderr)
+            log.error("%s", error)
         sys.exit(1)
     existing = app.registry.find(path=source.path)
     if existing is not None:
         source = existing
     else:
         source = app.registry.add(source)
-        print(f"Kaynak eklendi: {source.id} ({source.name})")
+        log.info("kaynak eklendi: %s (%s)", source.id, source.name)
     app.registry.set_active(source.id)
     return source
 
@@ -67,7 +86,7 @@ def _acquire_instance_lock():
     info = lock.getLockInfo()  # PySide6: (pid, host, app)
     pid = info[0] if isinstance(info, tuple) and info and isinstance(info[0], int) else 0
     hint = f" (PID {pid}). Önce onu kapat (Ctrl+C) ya da: kill {pid}" if pid else ". Önce onu kapat."
-    print(f"Canard zaten çalışıyor{hint}", file=sys.stderr)
+    log.error("Canard zaten çalışıyor%s", hint)
     return None
 
 
@@ -76,6 +95,7 @@ def main(argv=None) -> int:
     QCoreApplication.setOrganizationName("Canard")
 
     args = build_parser().parse_args(argv)
+    logs.setup(args.log_level, None if args.log_file is None else (args.log_file or logs.default_log_path()))
 
     if args.list or args.remove:
         app = CanardApp(args.settings)
@@ -88,15 +108,23 @@ def main(argv=None) -> int:
             print(f"{mark} {source.id}  {source.type:<9}  {source.name}  {source.url or source.path}")
         return 0
 
-    if args.mode == "screensaver":
-        print("Bu mod Faz 3a'da geliyor.", file=sys.stderr)
+    if args.saver_fps is not None and not 1 <= args.saver_fps <= 60:
+        log.error("--saver-fps 1–60 arasında olmalı")
         return 2
+    if args.screensaver_after is not None:
+        if args.mode == "preview":
+            log.error("--screensaver-after yalnız --mode wallpaper ya da --mode screensaver ile kullanılır")
+            return 2
+        if args.screensaver_after <= 0:
+            log.error("--screensaver-after sıfırdan büyük olmalı (dakika)")
+            return 2
 
     instance_lock = _acquire_instance_lock()
     if instance_lock is None:
         return 1
 
     app = CanardApp(args.settings)
+    log.debug("Canard %s · Python %s · ayarlar: %s", canard.__version__, sys.version.split()[0], app.settings_path)
 
     if args.url:
         source = _register_url(app, args.url)
@@ -105,49 +133,52 @@ def main(argv=None) -> int:
     elif args.source:
         source = app.registry.get(args.source)
         if source is None:
-            print(f"Kaynak bulunamadı: {args.source}", file=sys.stderr)
+            log.error("kaynak bulunamadı: %s", args.source)
             return 1
         app.registry.set_active(source.id)
     else:
         source = app.registry.active()
 
     if source is None:
-        print("Kaynak yok. Başlatmak için: canard --url https://...  veya  canard --path ./dist", file=sys.stderr)
+        log.error("kaynak yok. Başlatmak için: canard --url https://...  veya  canard --path ./dist")
         return 1
 
     if args.clear_boot:
         source.boot_script = None
         app.registry.update(source)
-        print("Boot script kaldırıldı")
+        log.info("boot script kaldırıldı")
     elif args.boot_file:
         from pathlib import Path
 
         boot_path = Path(args.boot_file).expanduser()
         if not boot_path.is_file():
-            print(f"Boot dosyası yok: {boot_path}", file=sys.stderr)
+            log.error("boot dosyası yok: %s", boot_path)
             return 1
         source.boot_script = boot_path.read_text(encoding="utf-8")
         app.registry.update(source)
-        print(f"Boot script bağlandı: {boot_path}")
+        log.info("boot script bağlandı: %s", boot_path)
 
     previous_port = source.port
     try:
         url = resolve_load_url(source, app.servers)
     except SourceError as error:
-        print(str(error), file=sys.stderr)
+        log.error("%s", error)
         return 1
     if source.port != previous_port:
         if previous_port:
-            print(f"Port {previous_port} dolu, {source.port} kullanılıyor (içeriğin yerel verileri sıfırlanır)",
-                  file=sys.stderr)
+            log.warning("port %s dolu, %s kullanılıyor (içeriğin yerel verileri sıfırlanır)",
+                        previous_port, source.port)
         app.registry.update(source)
 
     if source.boot_script:
-        print("Boot script aktif (kaldırmak için --clear-boot)")
+        log.info("boot script aktif (kaldırmak için --clear-boot)")
 
+    log.info("başlıyor: mod=%s · kaynak=%s (%s) · %s", args.mode, source.name, source.type, url)
     try:
         return app.run(url, mode=args.mode, boot_script=source.boot_script,
-                       interactive=args.interactive, system_audio=not args.no_system_audio)
+                       interactive=args.interactive, system_audio=not args.no_system_audio,
+                       screensaver_after=args.screensaver_after,
+                       saver_stream=not args.no_saver_stream, saver_fps=args.saver_fps)
     finally:
         instance_lock.unlock()
 

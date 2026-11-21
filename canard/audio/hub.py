@@ -5,12 +5,14 @@ Yakalama yalnızca en az bir sayfa ses istiyor ve duraklatılmamışken çalış
 """
 
 import base64
-import sys
+import logging
 
 from PySide6.QtCore import QObject, Signal, Slot
 
 # ~20 ms'lik paketler: tap 512 karelik (~10.7 ms) tamponları ikişer ikişer gönderilir.
 _BATCH_SECONDS = 0.02
+
+log = logging.getLogger("canard.audio")
 
 
 class PageAudio(QObject):
@@ -81,6 +83,7 @@ class SystemAudioHub(QObject):
 
     def update(self) -> dict:
         wanted = any(p.active for p in self._pages)
+        log.debug("abone sayfa: %d/%d etkin", sum(p.active for p in self._pages), len(self._pages))
         if wanted and self._format is None:
             self._start()
         elif not wanted and self._format is not None:
@@ -103,15 +106,15 @@ class SystemAudioHub(QObject):
             return
         except Exception as error:
             self._error = f"Sistem sesi başlatılamadı: {error}"
-            print(f"[audio] {self._error}", file=sys.stderr, flush=True)
+            log.error("%s", self._error, exc_info=True)
             return
         self._set_format(fmt)
-        print(f"[audio] sistem sesi yakalanıyor ({fmt.sample_rate:.0f} Hz, {fmt.channels} kanal)", flush=True)
+        log.info("sistem sesi yakalanıyor (%.0f Hz, %d kanal)", fmt.sample_rate, fmt.channels)
 
     def _stop(self) -> None:
         if self._capture is not None and self._format is not None:
             self._capture.stop()
-            print("[audio] sistem sesi durdu", flush=True)
+            log.info("sistem sesi durdu")
         self._format = None
         self._pending.clear()
 
@@ -141,12 +144,12 @@ class SystemAudioHub(QObject):
             fmt = self._capture.restart()
         except Exception as error:
             self._error = f"Çıkış aygıtı değişti, sistem sesi yeniden kurulamadı: {error}"
-            print(f"[audio] {self._error}", file=sys.stderr, flush=True)
+            log.error("%s", self._error, exc_info=True)
             self._format = None
             return
         previous = self._format
         self._set_format(fmt)
-        print("[audio] çıkış aygıtı değişti, yakalama yeniden kuruldu", flush=True)
+        log.info("çıkış aygıtı değişti, yakalama yeniden kuruldu")
         if previous != self._format:
             for page_audio in self._pages:
                 page_audio.formatChanged.emit(self._format)

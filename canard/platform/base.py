@@ -30,6 +30,32 @@ class PlatformAdapter:
     def create_system_audio(self, on_chunk, on_device_change):
         raise NotImplementedError
 
+    # Ekran koruyucu (boşta tam ekran)
+    def idle_seconds(self) -> float:
+        raise NotImplementedError
+
+    def display_sleep_blockers(self) -> list[str]:
+        raise NotImplementedError
+
+    def apply_screensaver_window(self, widget) -> None:
+        raise NotImplementedError
+
+    def focus_keeper(self):
+        raise NotImplementedError
+
+    def watch_session(self, callback):
+        raise NotImplementedError
+
+    # Ekran koruyucu kare yayını (Canard.saver)
+    def screen_display_id(self, screen) -> int | None:
+        raise NotImplementedError
+
+    def window_visible(self, widget) -> bool:
+        raise NotImplementedError
+
+    def create_video_encoder(self, width: int, height: int, fps: int, bitrate: int, on_output):
+        raise NotImplementedError
+
     def screens(self) -> list[ScreenInfo]:
         from PySide6.QtGui import QGuiApplication
 

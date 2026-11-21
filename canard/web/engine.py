@@ -1,5 +1,6 @@
 import json
-import sys
+import logging
+import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
@@ -9,6 +10,8 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from canard.web.bridge import HostBridge
 from canard.web.policy import decide as decide_permission
+
+log = logging.getLogger("canard.web")
 
 
 def data_location() -> Path:
@@ -32,9 +35,22 @@ def create_profile(persistent: bool = True) -> QWebEngineProfile:
     return profile
 
 
+_CONSOLE_LEVELS = {
+    QWebEnginePage.JavaScriptConsoleMessageLevel.ErrorMessageLevel: logging.WARNING,
+    QWebEnginePage.JavaScriptConsoleMessageLevel.WarningMessageLevel: logging.INFO,
+    QWebEnginePage.JavaScriptConsoleMessageLevel.InfoMessageLevel: logging.DEBUG,
+}
+
+
 class CanardPage(QWebEnginePage):
     def javaScriptConsoleMessage(self, level, message, line_number, source_id):
-        print(f"[web:{level}] {message}  ({source_id}:{line_number})", file=sys.stderr, flush=True)
+        # Sayfa konsolu: hatalar uyarı, uyarılar bilgi, console.log debug düzeyinde. Canard'ın kendi
+        # boot/köprü mesajları ("[canard…") her zaman bilgi düzeyinde görünür.
+        log_level = _CONSOLE_LEVELS.get(level, logging.DEBUG)
+        if message.startswith("[canard"):
+            log_level = logging.INFO
+        where = f"  ({source_id}:{line_number})" if source_id and log_level != logging.INFO else ""
+        log.log(log_level, "konsol: %s%s", message, where)
 
 
 class WebHost(QWidget):
@@ -91,8 +107,10 @@ class WebHost(QWidget):
     def _on_desktop_media_requested(self, request) -> None:
         model = request.screensModel()
         if model.rowCount() > 0:
+            log.debug("ekran paylaşımı istendi: ilk ekran seçildi")
             request.selectScreen(model.index(0, 0))
         else:
+            log.warning("ekran paylaşımı istendi ama paylaşılacak ekran yok")
             request.cancel()
 
     def install_bridge(self, bridge: HostBridge) -> None:
@@ -100,6 +118,8 @@ class WebHost(QWidget):
 
     def load(self, url: str) -> None:
         self._current_url = url
+        self._load_started = time.monotonic()
+        log.debug("yükleniyor: %s", url)
         self._stack.setCurrentIndex(0)
         self.view.load(QUrl(url))
 
@@ -120,6 +140,7 @@ class WebHost(QWidget):
         if suspended == self._suspended:
             return
         self._suspended = suspended
+        log.debug("sayfa %s", "donduruldu (görünmez + Frozen)" if suspended else "etkin")
         if self.page_audio is not None:
             self.page_audio.set_paused(suspended)
         if suspended:
@@ -130,14 +151,20 @@ class WebHost(QWidget):
             self.page.setVisible(True)
 
     def _on_load_finished(self, ok: bool) -> None:
+        elapsed = time.monotonic() - getattr(self, "_load_started", time.monotonic())
         if ok:
+            log.debug("yüklendi (%.1f sn): %s", elapsed, self.page.url().toString())
             self._stack.setCurrentIndex(0)
             if self._boot_script:
+                log.debug("boot script çalıştırılıyor")
                 self.page.runJavaScript(self._boot_script)
         else:
+            log.error("içerik yüklenemedi (%.1f sn): %s", elapsed, self._current_url)
             self._show_error()
 
-    def _on_render_terminated(self, *args) -> None:
+    def _on_render_terminated(self, status=None, exit_code=None, *args) -> None:
+        log.error("sayfa süreci sonlandı: durum=%s, çıkış kodu=%s (%s)",
+                  getattr(status, "name", status), exit_code, self._current_url)
         self._show_error()
 
     def _show_error(self) -> None:

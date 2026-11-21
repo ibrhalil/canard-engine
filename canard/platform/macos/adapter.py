@@ -37,6 +37,46 @@ class MacAdapter(PlatformAdapter):
 
         return SystemAudioTap(on_chunk, on_device_change)
 
+    def idle_seconds(self) -> float:
+        from canard.platform.macos.idle import idle_seconds
+
+        return idle_seconds()
+
+    def display_sleep_blockers(self) -> list[str]:
+        from canard.platform.macos.idle import display_sleep_blockers
+
+        return display_sleep_blockers()
+
+    def apply_screensaver_window(self, widget) -> None:
+        from canard.platform.macos.idle import apply_screensaver_level
+
+        apply_screensaver_level(widget)
+
+    def focus_keeper(self):
+        from canard.platform.macos.idle import FocusKeeper
+
+        return FocusKeeper()
+
+    def watch_session(self, callback):
+        from canard.platform.macos.idle import SessionWatcher
+
+        return SessionWatcher(callback)
+
+    def screen_display_id(self, screen) -> int | None:
+        from canard.platform.macos.wallpaper import display_id_for
+
+        return display_id_for(screen)
+
+    def window_visible(self, widget) -> bool:
+        from canard.platform.macos.wallpaper import is_visible
+
+        return is_visible(widget)
+
+    def create_video_encoder(self, width: int, height: int, fps: int, bitrate: int, on_output):
+        from canard.platform.macos.video import HevcEncoder
+
+        return HevcEncoder(width, height, fps, bitrate, on_output)
+
     def unwatch_visibility(self, token) -> None:
         from canard.platform.macos.wallpaper import remove_observer
 

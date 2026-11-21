@@ -122,7 +122,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, format, *args):
-        pass
+        import logging
+
+        logging.getLogger("canard.server").debug("%s %s", self.address_string(), format % args)
 
 
 class _Server(ThreadingHTTPServer):

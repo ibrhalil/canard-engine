@@ -1,4 +1,8 @@
+import logging
+
 from PySide6.QtWebEngineCore import QWebEnginePermission
+
+log = logging.getLogger("canard.web")
 
 _ALLOWED = {
     QWebEnginePermission.PermissionType.MediaAudioCapture,
@@ -10,7 +14,11 @@ _ALLOWED = {
 
 
 def decide(permission) -> None:
-    if permission.permissionType() in _ALLOWED:
+    kind = permission.permissionType()
+    origin = permission.origin().toString()
+    if kind in _ALLOWED:
+        log.debug("izin verildi: %s (%s)", kind.name, origin)
         permission.grant()
     else:
+        log.info("izin reddedildi: %s (%s)", kind.name, origin)
         permission.deny()

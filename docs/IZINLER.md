@@ -47,10 +47,19 @@ Canard, yüklediği web içeriğine (uzak URL, yerel build, dev sunucusu) şu ka
 
 Sistem sesi sayfaya Qt'nin kendi köprüsüyle (QWebChannel) iletilir: açık bir ağ portu yoktur, başka bir uygulama ya da tarayıcıdaki bir site bu sese erişemez.
 
+## Ekran koruyucu ve kilit
+
+**Canard.saver** (önerilen) macOS'un gerçek ekran koruyucusudur: zamanlayıcı ve parola/kilit macOS'ta kalır, ek izin gerekmez. Ekran koruyucu açıkken (oturum kilitliyken de) Canard duvar kağıdı sayfasını çizmeye ve — kaynak seçtiyse — sistem sesini/mikrofonu dinlemeye devam eder; kareler yalnız ekran koruyucuya gider.
+
+Canard'ın **kendi boşta tam ekranı** (`--screensaver-after`) da ek izin istemez (boşluk süresi izinsiz okunabilen giriş sayacından, "ekranı uyanık tut" kilitleri güç yönetiminden okunur; klavye/fare içeriği dinlenmez).
+
+> ⚠️ Boşta tam ekran açıkken **oturum kilitli değildir**; macOS kilitli oturumda uygulama pencerelerini gizlediği için kilitten önce çalışmak zorundadır. Kilit ekranı geldiği anda çekilir ve kilit ekranını asla örtmez. Kilit gerekiyorsa Canard.saver'ı kullan.
+
 ## Ağ
 
 - **Uzak kaynaklar:** Yalnız eklediğin URL'ye bağlanılır.
 - **Yerel build (`--path`):** Klasör, yalnızca bu bilgisayardan erişilebilen `127.0.0.1` üzerinde sunulur; klasör dışına çıkan istekler reddedilir. Port ilk açılışta seçilip kaynağa kaydedilir ve sonraki açılışlarda aynı port kullanılır. İçeriğin localStorage gibi yerel verileri adrese (port dahil) bağlı olduğu için bu, ayarların korunmasını sağlar.
+- **Ekran koruyucu yayını:** Canard, `127.0.0.1:47391`'de Canard.saver için duvar kağıdı karelerini (HEVC) yayınlar; yalnızca bu bilgisayardan erişilebilir. Ekran koruyucu süreci macOS kum havuzunda çalıştığı için bir anahtar okuyamaz; bu yüzden bağlantıda kimlik doğrulaması yoktur ve **bu bilgisayardaki başka bir süreç de duvar kağıdı içeriğinin karelerini alabilir** (ekranın geri kalanı değil, yalnız Canard'ın kendi sayfası). İstemiyorsan `--no-saver-stream`.
 - Canard hiçbir telemetri ya da kullanım verisi göndermez.
 
 ## Saklanan veriler
@@ -59,6 +68,7 @@ Sistem sesi sayfaya Qt'nin kendi köprüsüyle (QWebChannel) iletilir: açık bi
 |---|---|
 | Kaynak listesi, aktif kaynak, boot script'ler | `~/Library/Application Support/Canard/Canard/settings.json` |
 | İçeriğin localStorage, çerez ve önbelleği | `~/Library/Application Support/Canard/Canard/webprofile/` |
+| Log dosyası (yalnız `--log-file` verilirse) | `~/Library/Logs/Canard/canard.log` — sayfa adresleri ve konsol mesajları içerebilir |
 
 Hepsini sıfırlamak için Canard kapalıyken:
 
@@ -74,5 +84,6 @@ Duvar kağıdı modu çalışırken şu kombinasyonlar **tüm sistemde** Canard'
 |---|---|
 | `⌃⌥⌘←` / `⌃⌥⌘→` | İçeriğe ← / → tuşu gönderir (mscillus'ta önceki/sonraki mod) |
 | `⌃⌥⌘↑` | Etkileşimli mod aç/kapat |
+| `⌃⌥⌘↓` | Ekran koruyucuyu hemen başlat (yalnız `--screensaver-after` ile) |
 
 `⌘⌥←/→` JetBrains IDE'ler ve Chrome ile çakıştığı için `⌃⌥⌘` seçildi. Canard kapanınca kısayollar serbest kalır.
