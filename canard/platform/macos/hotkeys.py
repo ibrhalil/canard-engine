@@ -1,0 +1,126 @@
+"""Carbon RegisterEventHotKey ile global kısayollar (ctypes).
+
+pyobjc-framework-Carbon 13 yalnızca RegisterEventHotKey'i sarar; InstallEventHandler
+(C callback) yoktur. Bu yüzden Carbon'a doğrudan ctypes ile bağlanılır. Carbon hotkey'leri
+Erişilebilirlik izni istemez ve NSApplication olay döngüsünde (Qt Cocoa) teslim edilir.
+"""
+
+import ctypes
+import ctypes.util
+from collections.abc import Callable
+
+_carbon = ctypes.CDLL(ctypes.util.find_library("Carbon"))
+
+OSStatus = ctypes.c_int32
+EventHandlerProcPtr = ctypes.CFUNCTYPE(OSStatus, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+
+
+def _fourcc(code: str) -> int:
+    return int.from_bytes(code.encode("ascii"), "big")
+
+
+class EventTypeSpec(ctypes.Structure):
+    _fields_ = [("eventClass", ctypes.c_uint32), ("eventKind", ctypes.c_uint32)]
+
+
+class EventHotKeyID(ctypes.Structure):
+    _fields_ = [("signature", ctypes.c_uint32), ("id", ctypes.c_uint32)]
+
+
+kEventClassKeyboard = _fourcc("keyb")
+kEventHotKeyPressed = 5
+kEventParamDirectObject = _fourcc("----")
+typeEventHotKeyID = _fourcc("hkid")
+_SIGNATURE = _fourcc("cnrd")
+
+CMD = 1 << 8
+SHIFT = 1 << 9
+OPTION = 1 << 11
+CONTROL = 1 << 12
+
+KEY_LEFT = 0x7B
+KEY_RIGHT = 0x7C
+KEY_DOWN = 0x7D
+KEY_UP = 0x7E
+
+# ⌘⌥←/→ JetBrains (Navigate Back/Forward) ve Chrome (sekme) ile çakıştığı için ⌃⌥⌘ kullanılır.
+_HYPER = CONTROL | OPTION | CMD
+DEFAULT_BINDINGS = {
+    "prev": (KEY_LEFT, _HYPER, "⌃⌥⌘←"),
+    "next": (KEY_RIGHT, _HYPER, "⌃⌥⌘→"),
+    "toggle_interactive": (KEY_UP, _HYPER, "⌃⌥⌘↑"),
+}
+
+_carbon.GetApplicationEventTarget.restype = ctypes.c_void_p
+_carbon.GetApplicationEventTarget.argtypes = []
+_carbon.RegisterEventHotKey.restype = OSStatus
+_carbon.RegisterEventHotKey.argtypes = [
+    ctypes.c_uint32, ctypes.c_uint32, EventHotKeyID, ctypes.c_void_p, ctypes.c_uint32,
+    ctypes.POINTER(ctypes.c_void_p),
+]
+_carbon.UnregisterEventHotKey.restype = OSStatus
+_carbon.UnregisterEventHotKey.argtypes = [ctypes.c_void_p]
+_carbon.InstallEventHandler.restype = OSStatus
+_carbon.InstallEventHandler.argtypes = [
+    ctypes.c_void_p, EventHandlerProcPtr, ctypes.c_ulong, ctypes.POINTER(EventTypeSpec),
+    ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p),
+]
+_carbon.RemoveEventHandler.restype = OSStatus
+_carbon.RemoveEventHandler.argtypes = [ctypes.c_void_p]
+_carbon.GetEventParameter.restype = OSStatus
+_carbon.GetEventParameter.argtypes = [
+    ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_ulong,
+    ctypes.c_void_p, ctypes.c_void_p,
+]
+
+
+class HotkeyRegistry:
+    def __init__(self):
+        self._callbacks: dict[int, Callable[[], None]] = {}
+        self._refs: list[ctypes.c_void_p] = []
+        self._handler_ref = ctypes.c_void_p()
+        self._proc = EventHandlerProcPtr(self._on_event)
+        spec = EventTypeSpec(kEventClassKeyboard, kEventHotKeyPressed)
+        status = _carbon.InstallEventHandler(
+            _carbon.GetApplicationEventTarget(), self._proc, 1, ctypes.byref(spec),
+            None, ctypes.byref(self._handler_ref),
+        )
+        if status != 0:
+            raise OSError(f"InstallEventHandler başarısız: {status}")
+
+    def register(self, key_code: int, modifiers: int, callback: Callable[[], None]) -> bool:
+        hotkey_id = len(self._callbacks) + 1
+        ref = ctypes.c_void_p()
+        status = _carbon.RegisterEventHotKey(
+            key_code, modifiers, EventHotKeyID(_SIGNATURE, hotkey_id),
+            _carbon.GetApplicationEventTarget(), 0, ctypes.byref(ref),
+        )
+        if status != 0:
+            return False
+        self._callbacks[hotkey_id] = callback
+        self._refs.append(ref)
+        return True
+
+    def close(self) -> None:
+        for ref in self._refs:
+            _carbon.UnregisterEventHotKey(ref)
+        self._refs.clear()
+        self._callbacks.clear()
+        if self._handler_ref:
+            _carbon.RemoveEventHandler(self._handler_ref)
+            self._handler_ref = ctypes.c_void_p()
+
+    def _on_event(self, _call_ref, event, _user_data) -> int:
+        hotkey = EventHotKeyID()
+        status = _carbon.GetEventParameter(
+            event, kEventParamDirectObject, typeEventHotKeyID, None,
+            ctypes.sizeof(hotkey), None, ctypes.byref(hotkey),
+        )
+        if status == 0 and hotkey.signature == _SIGNATURE:
+            callback = self._callbacks.get(hotkey.id)
+            if callback is not None:
+                try:
+                    callback()
+                except Exception as error:
+                    print(f"[hotkey] {error!r}", flush=True)
+        return 0

@@ -1,0 +1,45 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Araç önbellekleri ve test çıktıları
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Derleme ve paketleme çıktıları (PyInstaller/Nuitka, .saver/.scr, .app/.dmg — Faz 3, Faz 6)
+dist/
+build/
+*.dmg
+*.pkg
+*.msi
+
+# Gizli bilgiler (AGENTS.md: repoda secret tutulmaz); örnek dosya hariç
+.env
+.env.*
+!.env.example
+
+# Yerel test kaynakları ve çalışma artıkları
+*.log
+*.tmp
+node_modules/
+
+# IDE / editör
+.idea/
+.vscode/
+*.swp
+*~
+
+# İşletim sistemi
+.DS_Store
+._*
+Thumbs.db
+desktop.ini

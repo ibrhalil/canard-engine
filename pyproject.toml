@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "canard"
+version = "0.1.0"
+description = "CANvas boARD engine — web içerikleri canlı duvar kağıdı ve ekran koruyucusu olarak çalıştıran masaüstü motoru"
+readme = "README.md"
+license = "GPL-3.0-only"
+requires-python = ">=3.11"
+dependencies = [
+    "pyobjc-framework-cocoa>=10 ; sys_platform == 'darwin'",
+    "pyobjc-framework-coreaudio>=10 ; sys_platform == 'darwin'",
+    "pyobjc-framework-libdispatch>=10 ; sys_platform == 'darwin'",
+    "pyobjc-framework-quartz>=10 ; sys_platform == 'darwin'",
+    "pyobjc-framework-screencapturekit>=10 ; sys_platform == 'darwin'",
+    "PySide6>=6.8,<7",
+]
+
+[project.scripts]
+canard = "canard.app.main:main"
+
+[tool.setuptools.packages.find]
+include = ["canard*"]
+
+[tool.setuptools.package-data]
+canard = ["web/*.js"]

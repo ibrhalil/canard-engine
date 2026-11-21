@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Canard — Mikrofon & Kodek Testi</title>
+<style>
+  body { background: #111; color: #eee; font: 15px/1.5 system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  button { font-size: 1rem; padding: .6rem 1.2rem; }
+  pre { background: #000; padding: 1rem; min-height: 4rem; white-space: pre-wrap; }
+  #bar { height: 18px; background: #333; border-radius: 9px; margin: 1rem 0; overflow: hidden; }
+  #fill { height: 100%; width: 0; background: #4ade80; transition: width .05s linear; }
+  h2 { margin-top: 2.5rem; }
+</style>
+</head>
+<body>
+<h1>Canard — Mikrofon Testi</h1>
+<button id="start">Mikrofonu Başlat</button>
+<div id="bar"><div id="fill"></div></div>
+<pre id="log">hazır</pre>
+
+<h2>Dosya kodek testi</h2>
+<input type="file" id="file" accept="audio/*,.mp3,.flac,.wav,.ogg,.opus,.m4a,.aac">
+<pre id="flog">bir ses dosyası seç (mp3, wav, flac, m4a...)</pre>
+
+<script>
+const log = (el, ...a) => { el.textContent = a.join(' ') + '\n' + el.textContent; };
+
+document.getElementById('start').onclick = async () => {
+  const el = document.getElementById('log');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+    log(el, 'getUserMedia OK');
+    for (const t of stream.getAudioTracks())
+      log(el, 'track:', t.label, '| enabled=' + t.enabled, '| muted=' + t.muted);
+    const ctx = new AudioContext();
+    await ctx.resume();
+    log(el, 'AudioContext:', ctx.state, '| örnek hızı:', ctx.sampleRate);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    const data = new Float32Array(analyser.fftSize);
+    const fill = document.getElementById('fill');
+    (function loop() {
+      analyser.getFloatTimeDomainData(data);
+      let sum = 0;
+      for (const v of data) sum += v * v;
+      const rms = Math.sqrt(sum / data.length);
+      fill.style.width = Math.min(100, rms * 400) + '%';
+      requestAnimationFrame(loop);
+    })();
+    log(el, 'Yeşil çubuk konuşurken oynuyorsa mikrofon çalışıyor.');
+    log(el, 'Çubuk hep 0 kalıyorsa: Sistem Ayarları → Gizlilik ve Güvenlik → Mikrofon → terminal uygulaman AÇIK mı?');
+  } catch (e) {
+    log(el, 'HATA:', e.name, '—', e.message);
+  }
+};
+
+document.getElementById('file').onchange = (e) => {
+  const el = document.getElementById('flog');
+  const f = e.target.files[0];
+  if (!f) return;
+  const a = new Audio();
+  a.src = URL.createObjectURL(f);
+  a.oncanplay = () => { a.play(); log(el, 'OK — çalıyor:', f.name, '| tip:', f.type || 'bilinmiyor'); };
+  a.onerror = () => log(el, 'HATA — kodek yok:', f.name, '| tip:', f.type || 'bilinmiyor');
+};
+</script>
+</body>
+</html>
