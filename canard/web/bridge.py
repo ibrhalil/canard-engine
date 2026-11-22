@@ -2,6 +2,15 @@ import json
 
 from canard import __version__
 
+SCRIPT_NAME = "canard-host-bridge"
+
+
+def remove_scripts(profile, name: str) -> None:
+    """Profilden bu adlı betikleri kaldırır (yeni yüklenen sayfalarda geçerli)."""
+    scripts = profile.scripts()
+    for script in scripts.find(name):
+        scripts.remove(script)
+
 
 class HostBridge:
     def __init__(self, mode: str, source: dict | None = None, system_audio: bool = False):
@@ -22,8 +31,9 @@ class HostBridge:
     def install(self, profile) -> None:
         from PySide6.QtWebEngineCore import QWebEngineScript
 
+        remove_scripts(profile, SCRIPT_NAME)
         script = QWebEngineScript()
-        script.setName("canard-host-bridge")
+        script.setName(SCRIPT_NAME)
         script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
         script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
         script.setRunsOnSubFrames(False)

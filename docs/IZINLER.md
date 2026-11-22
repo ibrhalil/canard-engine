@@ -4,9 +4,29 @@ Canard'ın hangi sistem izinlerini neden kullandığı, içeriğe hangi yetkiler
 
 ## İzin kime verilir?
 
-Canard şimdilik terminalden (`uv run canard`) çalışır. macOS izinleri **Canard'a değil, onu başlatan terminal uygulamasına** (iTerm, Terminal, Warp…) verilir. Bu yüzden bir izni açtıktan sonra **terminali kapatıp yeniden açmak** gerekebilir.
+- **Canard.app ile (menü çubuğu, önerilen):** izinler **"Canard"** adına sorulur ve Canard'a bağlanır; izin pencerelerinde Canard'ın kendi açıklaması görünür. Canard.app Finder, Spotlight ya da `open` ile açılmalıdır: macOS izni, isteyen alt süreçten (Python, sayfa süreci QtWebEngineProcess) başlatıcıya kadar "sorumlu süreç" zincirini izleyerek verir (doğrulandı: her iki süreçte `responsible path = …/Canard.app/Contents/MacOS/Canard`).
+- **Terminalden (`uv run canard …`):** izinler **onu başlatan terminal uygulamasına** (iTerm, Terminal, Warp…) verilir. Bir izni açtıktan sonra **terminali kapatıp yeniden açmak** gerekebilir.
 
-Faz 6'da paketlenmiş `Canard.app` ile izinler doğrudan Canard'a bağlanacak ve izin pencerelerinde kendi açıklamaları görünecek.
+Canard.app ad-hoc imzalıysa her yeniden derlemeden sonra macOS izinleri yeniden sorabilir; "Canard Dev" kod imzalama sertifikasıyla imzalanınca kararlar korunur (bkz. [KULLANIM.md](KULLANIM.md#menü-çubuğu-uygulaması-canardapp)).
+
+## İlk açılış: hangi izinler sorulur, ne yapmalı?
+
+Canard.app ilk kez ses kullandığında macOS kendi izin penceresini **"Canard"** adıyla ve Canard'ın açıklamasıyla açar. İzin yalnızca kullanılan özellik için sorulur:
+
+| Ne zaman | macOS penceresi | Ne yapmalı |
+|---|---|---|
+| İçerik sistem sesini ilk istediğinde (ör. başlangıç betiği "mscillus: sistem sesi") | "Canard, bu bilgisayarda çalan sesi … iletir" | **İzin Ver**. Görselleştirici çalan müziğe tepki verir |
+| İçerik mikrofonu ilk istediğinde (ör. "mscillus: mikrofon") | "Canard, … mikrofon istediğinde sesi içeriğe iletir" | **İzin Ver** |
+
+**Yanlışlıkla "İzin Verme" dediysen:** macOS bir daha sormaz. Canard bunu fark eder:
+
+- İçerik o sesi istediğinde bir kez **"Canard sistem sesini duyamıyor"** (ya da mikrofon) penceresi çıkar; **Ayarları Aç** doğru bölmeyi açar.
+- Menünün en üst satırında **⚠︎ izin gerekli** görünür; **İzinler ▸** alt menüsü her iznin durumunu (izin verildi ✓ / kapalı ⚠︎ / henüz sorulmadı) gösterir ve ayar bölmelerini açar.
+- Ayarlarda Canard'ı açtıktan sonra Canard'ı menüden **Çık** deyip yeniden aç.
+
+Elle: Sistem Ayarları › Gizlilik ve Güvenlik › **Ekran ve Sistem Sesi Kaydı** › *Yalnızca Sistem Sesi Kaydı* altında **Canard**; mikrofon için **Mikrofon** › **Canard**.
+
+> ℹ️ Sistem sesi izninin durumu macOS'un belgelenmemiş bir işleviyle (TCC, yalnız okuma) okunur; ileride macOS değiştirirse menüde "bilinmiyor" yazar, yakalama etkilenmez. Mikrofon durumu genel API'den (AVFoundation) gelir.
 
 ## macOS sistem izinleri
 
@@ -22,10 +42,11 @@ Sistem sesi yakalanırken macOS menü çubuğunda bir kayıt göstergesi görün
 
 ### İzni geri almak / sıfırlamak
 
-Ayarlar ekranındaki listeden terminal uygulamasının anahtarını kapatmak yeterlidir. Terminalden sıfırlamak için (iTerm örneği; Terminal için `com.apple.Terminal`):
+Ayarlar ekranındaki listeden Canard'ın (ya da terminal uygulamasının) anahtarını kapatmak yeterlidir. Terminalden sıfırlamak için:
 
 ```bash
-tccutil reset Microphone com.googlecode.iterm2
+tccutil reset All dev.canard.app                 # Canard.app'in tüm izinleri
+tccutil reset Microphone com.googlecode.iterm2   # terminalden çalıştırıyorsan (iTerm örneği; Terminal: com.apple.Terminal)
 tccutil reset ScreenCapture com.googlecode.iterm2
 ```
 
@@ -59,7 +80,7 @@ Canard'ın **kendi boşta tam ekranı** (`--screensaver-after`) da ek izin istem
 
 - **Uzak kaynaklar:** Yalnız eklediğin URL'ye bağlanılır.
 - **Yerel build (`--path`):** Klasör, yalnızca bu bilgisayardan erişilebilen `127.0.0.1` üzerinde sunulur; klasör dışına çıkan istekler reddedilir. Port ilk açılışta seçilip kaynağa kaydedilir ve sonraki açılışlarda aynı port kullanılır. İçeriğin localStorage gibi yerel verileri adrese (port dahil) bağlı olduğu için bu, ayarların korunmasını sağlar.
-- **Ekran koruyucu yayını:** Canard, `127.0.0.1:47391`'de Canard.saver için duvar kağıdı karelerini (HEVC) yayınlar; yalnızca bu bilgisayardan erişilebilir. Ekran koruyucu süreci macOS kum havuzunda çalıştığı için bir anahtar okuyamaz; bu yüzden bağlantıda kimlik doğrulaması yoktur ve **bu bilgisayardaki başka bir süreç de duvar kağıdı içeriğinin karelerini alabilir** (ekranın geri kalanı değil, yalnız Canard'ın kendi sayfası). İstemiyorsan `--no-saver-stream`.
+- **Ekran koruyucu yayını:** Canard, `127.0.0.1:47391`'de Canard.saver için duvar kağıdı karelerini (HEVC) yayınlar; yalnızca bu bilgisayardan erişilebilir. Ekran koruyucu süreci macOS kum havuzunda çalıştığı için bir anahtar okuyamaz; bu yüzden bağlantıda kimlik doğrulaması yoktur ve **bu bilgisayardaki başka bir süreç de duvar kağıdı içeriğinin karelerini alabilir** (ekranın geri kalanı değil, yalnız Canard'ın kendi sayfası). İstemiyorsan menüden "Canard.saver'a yayın"ı kapat ya da `--no-saver-stream`: port açık kalır ama hiç kare gönderilmez, bağlanana yalnız "yayın kapalı" mesajı döner (ekran koruyucu bu nedeni gösterir).
 - Canard hiçbir telemetri ya da kullanım verisi göndermez.
 
 ## Saklanan veriler
@@ -82,8 +103,9 @@ Duvar kağıdı modu çalışırken şu kombinasyonlar **tüm sistemde** Canard'
 
 | Kısayol | Görev |
 |---|---|
-| `⌃⌥⌘←` / `⌃⌥⌘→` | İçeriğe ← / → tuşu gönderir (mscillus'ta önceki/sonraki mod) |
-| `⌃⌥⌘↑` | Etkileşimli mod aç/kapat |
-| `⌃⌥⌘↓` | Ekran koruyucuyu hemen başlat (yalnız `--screensaver-after` ile) |
+| `⌃ + ⌥ + ⌘ + ←` / `→` | İçeriğe ← / → tuşu gönderir (mscillus'ta önceki/sonraki mod) |
+| `⌃ + ⌥ + ⌘ + K` | Etkileşimli mod aç/kapat |
+| `⌃ + ⌥ + ⌘ + L` | Sistem ekran koruyucusunu hemen başlat (`--screensaver-after` ile: Canard'ın kendi boşta tam ekranı) |
+| `⌃ + ⌥ + ⌘ + P` · `H` · `Y` · `N` | Duraklat/devam · duvar kağıdını gizle/göster · yeniden yükle · sonraki kaynak |
 
-`⌘⌥←/→` JetBrains IDE'ler ve Chrome ile çakıştığı için `⌃⌥⌘` seçildi. Canard kapanınca kısayollar serbest kalır.
+`⌘⌥←/→` JetBrains IDE'ler ve Chrome ile çakıştığı için `⌃ ⌥ ⌘` ön eki seçildi; harfler klavyenin sağ yarısında (sol el ön eki tutar). Canard kapanınca kısayollar serbest kalır.

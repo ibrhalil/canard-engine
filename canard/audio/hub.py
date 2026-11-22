@@ -56,6 +56,7 @@ class PageAudio(QObject):
 
 
 class SystemAudioHub(QObject):
+    started = Signal()  # yakalama başladı (izin kontrolü için)
     _captured = Signal(bytes)
     _deviceChanged = Signal()
 
@@ -110,6 +111,7 @@ class SystemAudioHub(QObject):
             return
         self._set_format(fmt)
         log.info("sistem sesi yakalanıyor (%.0f Hz, %d kanal)", fmt.sample_rate, fmt.channels)
+        self.started.emit()
 
     def _stop(self) -> None:
         if self._capture is not None and self._format is not None:

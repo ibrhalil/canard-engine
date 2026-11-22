@@ -1,6 +1,6 @@
-# Terminalden Kullanım
+# Kullanım
 
-Canard şimdilik terminalden çalıştırılır. Tüm komutlar proje klasöründe (`canard-engine/`) çalıştırılır. Yetki ve izinlerin açıklaması: [IZINLER.md](IZINLER.md).
+Canard iki yoldan kullanılır: **menü çubuğu uygulaması** (`Canard.app`, terminalsiz günlük kullanım) ve **terminal** (`uv run canard …`, tüm seçenekler). Tüm komutlar proje klasöründe (`canard-engine/`) çalıştırılır. Yetki ve izinlerin açıklaması: [IZINLER.md](IZINLER.md).
 
 ## Gereksinimler
 
@@ -11,6 +11,37 @@ Canard şimdilik terminalden çalıştırılır. Tüm komutlar proje klasöründ
 uv sync                # bağımlılıkları kur (ilk sefer ve pyproject değişince)
 uv run canard --help   # tüm seçenekler
 ```
+
+## Menü çubuğu uygulaması (Canard.app)
+
+`Canard.app` depodaki Python ortamını (`.venv`) menü çubuğu uygulaması olarak açan küçük bir geliştirici uygulamasıdır: Dock'ta görünmez, ayarlar menüden yapılır ve hatırlanır. Python ve Qt'yi içine gömen dağıtılabilir paket Faz 6'dadır; bu yüzden depo yerinde kalmalı ve `uv sync` yapılmış olmalıdır.
+
+```bash
+native/macos-app/build.sh --install     # derler, ~/Applications/Canard.app'e kurar; kuruluysa Canard.saver'ı da günceller
+open ~/Applications/Canard.app          # ya da Finder/Spotlight'tan "Canard"
+```
+
+Menü (menü çubuğundaki çerçeve-dalga simgesi):
+
+| Öğe | Ne yapar |
+|---|---|
+| Duvar kağıdı | Aç/kapat (`⌃ + ⌥ + ⌘ + H`). Kapalıyken sayfa gizli ve dondurulmuş bekler; Canard.saver yayını açıksa ekran koruyucu yine içerik gösterir (`--mode screensaver` gibi) |
+| Duraklat | İçeriği dondurur (`⌃ + ⌥ + ⌘ + P`): duvar kağıdı son karede kalır, CPU/GPU ve ses yakalama durur. Ekran koruyucu başlarsa o sürece canlanır |
+| Sayfayı yeniden yükle | İçerik takılırsa (`⌃ + ⌥ + ⌘ + Y`) |
+| Ekranlar ▸ | Bağlı ekranlar; işareti kaldırılan ekranda Canard içerik göstermez (duvar kağıdı da ekran koruyucu da). Seçim ekran adına göre hatırlanır, yeni takılan ekran açık gelir; kapatılan ekranın sayfası 10 dk park edilir, yeniden açılınca kaldığı yerden sürer |
+| Kaynak ▸ | Kayıtlı kaynaklar arasında geçiş (sonraki: `⌃ + ⌥ + ⌘ + N`); **URL ekle…** (uzak site/dev sunucusu), **Klasör ekle…** (`index.html` içeren build), **Kaynağı kaldır ▸** |
+| Başlangıç betiği ▸ | Aktif kaynağın boot script'i: Yok · mscillus: sistem sesi · mscillus: mikrofon · Dosya seç… |
+| Etkileşimli mod | `⌃ + ⌥ + ⌘ + K` ile aynı; menüdeki işaret kısayolla da güncellenir |
+| Sistem sesi | İçeriğe sistem sesi köprüsü (`--no-system-audio`'nun tersi); değişince sayfa yeniden yüklenir |
+| İzinler ▸ | Sistem sesi kaydı ve mikrofon izninin durumu (izin verildi ✓ / kapalı ⚠︎ / henüz sorulmadı) ve ilgili Sistem Ayarları bölmesi; kullanılan bir izin kapalıysa durum satırında "⚠︎ izin gerekli". Ayrıntı: [IZINLER.md](IZINLER.md) |
+| Ekran koruyucuyu başlat (ve kilitle) `⌃ + ⌥ + ⌘ + L` | Sistem ekran koruyucusunu hemen başlatır. Kilit ayarında parola "hemen" isteniyorsa oturum da kilitlenir ve Canard görüntüsü kilit altında görünür (menü bunu "…ve kilitle" diye gösterir) |
+| Ekran koruyucu ▸ | Canard.saver kurulu mu · parola ayarı ("hemen" değilse uyarı) · Kur…/Yeniden kur… (`~/Library/Screen Savers`'a kopyalar ve ekran koruyucu sürecini yeniden başlatır; ilk kurulumda Sistem Ayarları'ndan "Canard" seçilir) · Ekran koruyucu ayarları… · Kilit ekranı ayarları… · Canard.saver'a yayın · Kare hızı 24/30 |
+| Oturum açılışında başlat | `~/Library/LaunchAgents/dev.canard.app.plist` yazar/siler; Sistem Ayarları › Genel › Giriş Öğeleri'nde "Canard" görünür |
+| Log klasörünü aç · Hakkında · Çık | Menü uygulaması logu her zaman `~/Library/Logs/Canard/canard.log`'a yazar; Python'un ham çıktısı `launcher.log` |
+
+Seçimler `settings.json`'da (`tray.*`, `saver.*`; kapatılan ekranlar `tray.disabled_screens`) saklanır. Menünün en üstündeki satır durumu özetler: duvar kağıdı, duraklatma, kaynak, yayın. Global kısayollar ilgili öğelerin yanında, sağa dayalı gösterilir (macOS biçimiyle `⌃⌥⌘K`). İçeriğe ← / → gönderen `⌃ + ⌥ + ⌘ + ←/→` (mscillus'ta mod değiştirir) menüde yer almaz, yalnız kısayol olarak çalışır. Menü uygulaması açıkken terminalden ikinci bir Canard başlatılamaz (`Canard zaten çalışıyor`). Terminalden menü uygulamasını denemek için: `uv run canard --tray` (Dock simgesi gizlenir; izinler bu durumda terminale bağlıdır, bkz. [IZINLER.md](IZINLER.md)).
+
+İmza: anahtar zincirinde **"Canard Dev"** adlı kod imzalama sertifikası varsa `build.sh` onu kullanır (başka bir ad için `CANARD_SIGN_IDENTITY="<ad>"`); yoksa ad-hoc imzalar ve her yeniden derlemeden sonra macOS izinleri yeniden sorabilir. Sertifikayı bir kez oluşturmak için (Apple hesabı gerekmez): Anahtar Zinciri Erişimi › menü Anahtar Zinciri Erişimi › Sertifika Yardımcısı › Sertifika Oluştur… → Ad `Canard Dev`, Kimlik Türü *Kendinden İmzalı Kök*, Sertifika Türü *Kod İmzalama* → Oluştur. İlk derlemede `codesign` anahtara erişim ister: oturum parolası → *Her Zaman İzin Ver*. Doğrulama: `codesign -dvv ~/Applications/Canard.app 2>&1 | grep Authority` → `Authority=Canard Dev`. `security find-identity` sertifikayı `CSSMERR_TP_NOT_TRUSTED` gösterir; sorun değil — izinler sertifikanın güvenilirliğine değil kimliğine (yaprak sertifika özeti) bağlanır.
 
 ## Temel kavramlar
 
@@ -23,6 +54,7 @@ uv run canard --help   # tüm seçenekler
 | Seçenek | Açıklama |
 |---|---|
 | `--mode preview\|wallpaper\|screensaver` | Çalışma modu (varsayılan `preview`); `screensaver` = duvar kağıdı olmadan yalnız ekran koruyucu |
+| `--tray` | Menü çubuğu uygulaması (Canard.app'in çalıştırdığı); çalışma ayarları menüden, `--mode`/`--interactive`/`--saver-fps` vb. ile birlikte kullanılmaz; log dosyası her zaman açık |
 | `--screensaver-after DK` | Canard'ın kendi boşta tam ekranı (alternatif, gerçek ekran koruyucu değil) |
 | `--saver-fps N` / `--no-saver-stream` | Canard.saver yayını: kare hızı (varsayılan 30) / kapat |
 | `--url URL` | Uzak site ya da dev sunucusu ekler ve aktif yapar |
@@ -77,13 +109,17 @@ uv run canard --mode wallpaper --interactive    # fareyle kullanılabilir başla
 
 Çıkmak için terminalde **Ctrl+C**. Duvar kağıdı her Space'te görünür, her ekrana ayrı pencere açılır (ekran başına ayrı içerik durumu). Harici ekran çıkarılınca o ekranın sayfası 10 dakika dondurulup saklanır; aynı ekran bu sürede geri takılırsa içerik kaldığı yerden (aynı mod) sürer, yeniden yüklenmez; tamamen örtülünce (ör. tam ekran uygulama) içerik duraklatılır ve CPU kullanımı ~%1'e iner, görünür olunca devam eder.
 
-**Duvar kağıdı kısayolları** (başka uygulama öndeyken de çalışır):
+**Global kısayollar** (başka uygulama öndeyken de çalışır; sol el `⌃ ⌥ ⌘`'yi tutar, harfler klavyenin sağ yarısında):
 
 | Kısayol | Görev |
 |---|---|
-| `⌃⌥⌘←` / `⌃⌥⌘→` | İçeriğe ← / → tuşu gönderir (mscillus: önceki/sonraki mod) |
-| `⌃⌥⌘↑` | Etkileşimli mod aç/kapat — açıkken menülere tıklanabilir, masaüstü simgeleri örtülür |
-| `⌃⌥⌘↓` | Ekran koruyucuyu hemen başlat (`--screensaver-after` verildiyse) |
+| `⌃ + ⌥ + ⌘ + K` | Etkileşimli mod aç/kapat — açıkken menülere tıklanabilir, masaüstü simgeleri örtülür |
+| `⌃ + ⌥ + ⌘ + L` | Sistem ekran koruyucusunu (Canard.saver) hemen başlat — parola "hemen" ise oturumu da kilitler; `--screensaver-after` verildiyse Canard'ın kendi boşta tam ekranı |
+| `⌃ + ⌥ + ⌘ + P` | İçeriği duraklat / devam ettir |
+| `⌃ + ⌥ + ⌘ + H` | Duvar kağıdını gizle / göster |
+| `⌃ + ⌥ + ⌘ + Y` | Sayfayı yeniden yükle |
+| `⌃ + ⌥ + ⌘ + N` | Sonraki kayıtlı kaynak |
+| `⌃ + ⌥ + ⌘ + ←` / `→` | İçeriğe ← / → tuşu gönderir (mscillus: önceki/sonraki mod) |
 
 ### Ekran koruyucu: Canard.saver (gerçek macOS ekran koruyucusu)
 
@@ -95,7 +131,9 @@ Kurulum (bir kez; Xcode gerekmez, Command Line Tools yeterli):
 native/macos-saver/build.sh --open     # derler ve macOS kurulum penceresini açar → "Yalnızca bu kullanıcı için kur"
 ```
 
-Sonra Sistem Ayarları › Ekran Koruyucu › **Canard**'ı seç. Canard duvar kağıdı çalışırken ekran koruyucu başlayınca içerik gelir:
+Sonra Sistem Ayarları › Duvar Kağıdı › Ekran Koruyucu › **Canard**'ı seç.
+
+> ℹ️ **Güncellerken:** macOS ekran koruyucu sürecini (`legacyScreenSaver`) açık tutar ve yüklediği eski Canard.saver kodunu çalıştırmaya devam eder. Yeniden kurduktan sonra `killall legacyScreenSaver` (menüdeki "Yeniden kur…" bunu kendisi yapar). Canard duvar kağıdı çalışırken ekran koruyucu başlayınca içerik gelir:
 
 ```bash
 uv run canard --mode wallpaper --boot-file tools/mscillus-boot-system.js     # duvar kağıdı + ekran koruyucu
@@ -117,7 +155,7 @@ Canard.saver kurmadan, Canard kendi sayacıyla boşta kalınca içeriği tam ekr
 
 ```bash
 uv run canard --mode wallpaper --boot-file tools/mscillus-boot-system.js --screensaver-after 5
-uv run canard --mode wallpaper --screensaver-after 0.25     # denemek için 15 sn · ya da istediğin an ⌃⌥⌘↓
+uv run canard --mode wallpaper --screensaver-after 0.25     # denemek için 15 sn · ya da istediğin an ⌃ + ⌥ + ⌘ + L
 ```
 
 Herhangi bir fare/klavye hareketinde kapanır; başka uygulama ekranı uyanık tutuyorsa (video), oturum kilitlenince, ekran uyuyunca ya da macOS ekran koruyucusu başlayınca çekilir.
@@ -192,15 +230,17 @@ Hazır Qt paketindeki Chromium'da lisanslı kodekler yoktur: **mp3, ogg, opus, f
 | Belirti | Çözüm |
 |---|---|
 | Duvar kağıdında mscillus seçim ekranı hiç görünmüyor | Kayıtlı boot script kaynağı otomatik seçiyor: `--clear-boot` |
-| Menülere tıklanamıyor | Etkileşimli mod kapalı: `⌃⌥⌘↑` ya da `--interactive` |
+| Menülere tıklanamıyor | Etkileşimli mod kapalı: `⌃ + ⌥ + ⌘ + K` ya da `--interactive` |
 | Mikrofon kaynağı sessiz | Terminal uygulamasına Mikrofon izni ver, terminali yeniden başlat ([IZINLER.md](IZINLER.md)) |
 | Sistem sesi kaynağı sessiz | Ekran ve Sistem Sesi Kaydı › *Yalnızca Sistem Sesi Kaydı* listesine terminali ekle, terminali yeniden başlat; macOS 14.2+ gerekir |
 | Kısayollar çalışmıyor | Başka bir uygulama aynı kombinasyonu almış olabilir; açılıştaki `Kısayol: …` satırları kayıt başarılı olanları listeler |
 | "İçerik yüklenemedi" ekranı | URL'yi/ağı kontrol et, "Yeniden Dene"; yerel build için klasörde `index.html` olmalı |
-| `Canard zaten çalışıyor (PID …)` | Aynı anda tek Canard çalışabilir (ikincisi içerik ayarlarını kaydedemez, kısayollar çakışır). Diğerini kapat: kendi terminalinde Ctrl+C ya da `kill PID` |
+| `Canard zaten çalışıyor (PID …)` | Aynı anda tek Canard çalışabilir (ikincisi içerik ayarlarını kaydedemez, kısayollar çakışır). Diğerini kapat: kendi terminalinde Ctrl+C, menü çubuğu uygulamasıysa menüden Çık, ya da `kill PID` |
 | `Port … dolu, … kullanılıyor` uyarısı | Yerel build'in kayıtlı portunu başka bir program almış; yeni port seçildi, içeriğin yerel verileri bu kaynak için sıfırlanır |
-| Ekran koruyucuda "Canard çalışmıyor" | Canard'ı `--mode wallpaper` ya da `--mode screensaver` ile başlat; `--no-saver-stream` verilmemeli. Logda `ekran koruyucu yayını hazır` görünmeli |
+| Ekran koruyucuda "Canard çalışmıyor" | Canard'ı aç (menü uygulaması ya da `--mode wallpaper`/`--mode screensaver`); menüde "Canard.saver'a yayın" açık olmalı (`--no-saver-stream` verilmemeli). Logda `ekran koruyucu yayını hazır` görünmeli |
 | Ekran koruyucu günlüğü | `log stream --predicate 'subsystem == "dev.canard.saver"' --style compact` |
+| Canard.app açılıyor ama simge yok / hemen kapanıyor | `~/Library/Logs/Canard/launcher.log` (Python'un ham çıktısı) ve `canard.log`; başlatıcı beklenmedik kapanışta son satırları bir uyarıda gösterir |
+| Ekranı kilitleyince (⌃⌘Q, Touch ID) Canard görünmüyor | macOS kilit ekranında uygulama pencerelerine izin vermez ve kilit ekranı ekran koruyucuyu başlatmaz; kilidin üstünde yalnız ekran koruyucu çalışır. Kilitlemek için `⌃ + ⌥ + ⌘ + L` (ya da menü "Ekran koruyucuyu başlat ve kilitle", ya da Etkin Köşe → "Ekran Koruyucuyu Başlat"); Kilit Ekranı'nda "ekran koruyucu başladıktan sonra parola iste" → **Hemen** |
 | Ne olduğunu anlamak / hata bildirmek | `-v --log-file` ile çalıştır, `~/Library/Logs/Canard/canard.log` dosyasını paylaş |
 | Her şeyi sıfırlamak | Canard kapalıyken `rm -rf ~/Library/Application\ Support/Canard` |
 

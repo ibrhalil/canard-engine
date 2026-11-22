@@ -57,6 +57,8 @@ _NOT_SYNC = CM.kCMSampleAttachmentKey_NotSync
 _encode = VT.VTCompressionSessionEncodeFrameWithOutputHandler
 _make_time = CM.CMTimeMake
 _get_pts = CM.CMSampleBufferGetPresentationTimeStamp
+# Yeni bağlanan Canard.saver'a beklemeden anahtar kare (pyobjc sözlüğü CFDictionary olarak geçer; denendi).
+_FORCE_KEYFRAME = {VT.kVTEncodeFrameOptionKey_ForceKeyFrame: True}
 _MICROS = 1_000_000
 
 
@@ -104,7 +106,7 @@ class HevcEncoder:
             log.warning("kodlayıcı ayarları uygulanamadı: %s", failed)
         self._handler = self._done
 
-    def encode(self, image, pts_us: int) -> None:
+    def encode(self, image, pts_us: int, force_keyframe: bool = False) -> None:
         """image: QImage, Format_ARGB32 (bellekte BGRA), kodlayıcı boyutunda; pts_us: yakalanma anı (µs)."""
         status, pixel_buffer = Quartz.CVPixelBufferCreate(None, self.width, self.height,
                                                           Quartz.kCVPixelFormatType_32BGRA, None, None)
@@ -127,7 +129,7 @@ class HevcEncoder:
         finally:
             _cv.CVPixelBufferUnlockBaseAddress(ptr, 0)
         _encode(self._session, pixel_buffer, _make_time(pts_us, _MICROS), _make_time(_MICROS // self.fps, _MICROS),
-                None, None, self._handler)
+                _FORCE_KEYFRAME if force_keyframe else None, None, self._handler)
         self._index += 1
 
     def close(self) -> None:

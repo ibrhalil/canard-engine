@@ -35,7 +35,7 @@ class ScreensaverController(QObject):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(_IDLE_POLL_MS)
-        log.info("boşta %s sonra başlar (şimdi başlatmak için ⌃⌥⌘↓)", _duration(after_seconds))
+        log.info("boşta %s sonra başlar (şimdi başlatmak için ⌃ + ⌥ + ⌘ + L)", _duration(after_seconds))
 
     @property
     def active(self) -> bool:

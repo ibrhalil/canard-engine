@@ -21,6 +21,10 @@ class PlatformAdapter:
     def install_hotkeys(self, actions: dict) -> list[str]:
         raise NotImplementedError
 
+    def hotkey_keys(self) -> dict[str, str]:
+        """Eylem adı → tuş ("K", "←"); hepsi ⌃⌥⌘ ile birlikte. Menü bunları öğelerin yanında gösterir."""
+        raise NotImplementedError
+
     def watch_visibility(self, widget, callback):
         raise NotImplementedError
 
@@ -55,6 +59,16 @@ class PlatformAdapter:
 
     def create_video_encoder(self, width: int, height: int, fps: int, bitrate: int, on_output):
         raise NotImplementedError
+
+    # Menü çubuğu uygulaması (canard --tray): arka plan uygulaması, oturum açılışı, ekran koruyucu kurulumu.
+    # Dönen nesne: set_accessory, bring_to_front, login_item_enabled, set_login_item, saver_installed,
+    # saver_package, install_saver, open_screensaver_settings, open_lock_screen_settings, start_screensaver,
+    # screen_lock_delay, permission_status, open_privacy_settings (bkz. canard/platform/macos/app.py).
+    def app_integration(self):
+        raise NotImplementedError
+
+    def before_gui(self) -> None:
+        """QApplication oluşturulmadan hemen önce platforma özgü hazırlık (varsayılan: yok)."""
 
     def screens(self) -> list[ScreenInfo]:
         from PySide6.QtGui import QGuiApplication

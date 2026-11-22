@@ -7,15 +7,19 @@ from PySide6.QtCore import QCoreApplication
 import canard
 from canard.app import logs
 from canard.app.application import CanardApp
-from canard.content.sources import SourceError, from_build, from_url, resolve_load_url, validate
+from canard.content.sources import SourceError, from_build, from_url, validate
 
 log = logging.getLogger("canard")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="canard", description="Canard — CANvas boARD engine")
-    parser.add_argument("--mode", choices=["preview", "wallpaper", "screensaver"], default="preview",
-                        help="preview: pencere · wallpaper: canlı duvar kağıdı · screensaver: yalnız ekran koruyucu")
+    parser.add_argument("--mode", choices=["preview", "wallpaper", "screensaver"],
+                        help="preview: pencere (varsayılan) · wallpaper: canlı duvar kağıdı · "
+                             "screensaver: yalnız ekran koruyucu")
+    parser.add_argument("--tray", action="store_true",
+                        help="Menü çubuğu uygulaması: duvar kağıdı ve ekran koruyucu ayarları menüden, kalıcı "
+                             "(çalışma seçenekleri --mode, --interactive vb. bununla kullanılmaz)")
     parser.add_argument("--url", help="Uzak veya dev sunucu URL'si (http/https)")
     parser.add_argument("--path", help="Yerel production build klasörü (index.html içeren)")
     parser.add_argument("--source", help="Kayıtlı kaynak kimliği")
@@ -95,7 +99,10 @@ def main(argv=None) -> int:
     QCoreApplication.setOrganizationName("Canard")
 
     args = build_parser().parse_args(argv)
-    logs.setup(args.log_level, None if args.log_file is None else (args.log_file or logs.default_log_path()))
+    log_file = args.log_file
+    if args.tray and log_file is None:
+        log_file = ""  # menü çubuğu uygulamasının terminali yok: log her zaman dosyaya da yazılır
+    logs.setup(args.log_level, None if log_file is None else (log_file or logs.default_log_path()))
 
     if args.list or args.remove:
         app = CanardApp(args.settings)
@@ -108,11 +115,20 @@ def main(argv=None) -> int:
             print(f"{mark} {source.id}  {source.type:<9}  {source.name}  {source.url or source.path}")
         return 0
 
+    if args.tray:
+        conflicting = [flag for flag, given in (
+            ("--mode", args.mode), ("--interactive", args.interactive), ("--no-system-audio", args.no_system_audio),
+            ("--screensaver-after", args.screensaver_after is not None), ("--no-saver-stream", args.no_saver_stream),
+            ("--saver-fps", args.saver_fps is not None)) if given]
+        if conflicting:
+            log.error("--tray ile %s kullanılmaz: bu ayarlar menüden yapılır ve hatırlanır", ", ".join(conflicting))
+            return 2
+    mode = args.mode or "preview"
     if args.saver_fps is not None and not 1 <= args.saver_fps <= 60:
         log.error("--saver-fps 1–60 arasında olmalı")
         return 2
     if args.screensaver_after is not None:
-        if args.mode == "preview":
+        if mode == "preview":
             log.error("--screensaver-after yalnız --mode wallpaper ya da --mode screensaver ile kullanılır")
             return 2
         if args.screensaver_after <= 0:
@@ -140,6 +156,9 @@ def main(argv=None) -> int:
         source = app.registry.active()
 
     if source is None:
+        if args.tray:
+            log.info("kaynak yok: menüden ekle (Kaynak › URL ekle… / Klasör ekle…)")
+            return _run(app, instance_lock, None, args, mode)
         log.error("kaynak yok. Başlatmak için: canard --url https://...  veya  canard --path ./dist")
         return 1
 
@@ -158,27 +177,25 @@ def main(argv=None) -> int:
         app.registry.update(source)
         log.info("boot script bağlandı: %s", boot_path)
 
-    previous_port = source.port
-    try:
-        url = resolve_load_url(source, app.servers)
-    except SourceError as error:
-        log.error("%s", error)
-        return 1
-    if source.port != previous_port:
-        if previous_port:
-            log.warning("port %s dolu, %s kullanılıyor (içeriğin yerel verileri sıfırlanır)",
-                        previous_port, source.port)
-        app.registry.update(source)
+    if not args.tray:
+        try:
+            url = app.resolve(source)
+        except SourceError as error:
+            log.error("%s", error)
+            return 1
+        if source.boot_script:
+            log.info("boot script aktif (kaldırmak için --clear-boot)")
+        log.info("başlıyor: mod=%s · kaynak=%s (%s) · %s", mode, source.name, source.type, url)
+    return _run(app, instance_lock, source, args, mode)
 
-    if source.boot_script:
-        log.info("boot script aktif (kaldırmak için --clear-boot)")
 
-    log.info("başlıyor: mod=%s · kaynak=%s (%s) · %s", args.mode, source.name, source.type, url)
+def _run(app: CanardApp, instance_lock, source, args, mode: str) -> int:
+    if args.tray:
+        log.info("başlıyor: menü çubuğu")
     try:
-        return app.run(url, mode=args.mode, boot_script=source.boot_script,
-                       interactive=args.interactive, system_audio=not args.no_system_audio,
-                       screensaver_after=args.screensaver_after,
-                       saver_stream=not args.no_saver_stream, saver_fps=args.saver_fps)
+        return app.run(source, mode=mode, interactive=args.interactive, system_audio=not args.no_system_audio,
+                       screensaver_after=args.screensaver_after, saver_stream=not args.no_saver_stream,
+                       saver_fps=args.saver_fps, tray=args.tray)
     finally:
         instance_lock.unlock()
 

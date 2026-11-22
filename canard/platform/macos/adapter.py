@@ -27,6 +27,11 @@ class MacAdapter(PlatformAdapter):
                 registered.append(f"{label} → {name}")
         return registered
 
+    def hotkey_keys(self) -> dict[str, str]:
+        from canard.platform.macos.hotkeys import DEFAULT_BINDINGS
+
+        return {name: label.rsplit(" + ", 1)[-1] for name, (_code, _modifiers, label) in DEFAULT_BINDINGS.items()}
+
     def watch_visibility(self, widget, callback):
         from canard.platform.macos.wallpaper import observe_occlusion
 
@@ -76,6 +81,18 @@ class MacAdapter(PlatformAdapter):
         from canard.platform.macos.video import HevcEncoder
 
         return HevcEncoder(width, height, fps, bitrate, on_output)
+
+    def app_integration(self):
+        from canard.platform.macos import app
+
+        return app
+
+    def before_gui(self) -> None:
+        # Menülerin ortak ✓ görseli Qt'nin pencere katmanı yüklendikten sonra ilk kez çözülürse 4×3 pt çıkıyor ve ✓
+        # görünmüyor (Qt'siz 18×17; 2026-11-22 ölçüm). Qt'den önce bir kez çözülünce önbellekte doğru boyutta kalır.
+        from AppKit import NSImage
+
+        NSImage.imageNamed_("NSMenuCheckmark")
 
     def unwatch_visibility(self, token) -> None:
         from canard.platform.macos.wallpaper import remove_observer

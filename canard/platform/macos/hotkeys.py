@@ -41,16 +41,27 @@ CONTROL = 1 << 12
 
 KEY_LEFT = 0x7B
 KEY_RIGHT = 0x7C
-KEY_DOWN = 0x7D
-KEY_UP = 0x7E
+# Sanal tuş kodları fiziksel konumdur (kVK_ANSI_*): Q klavyede (TR/US) aynı tuşlar.
+KEY_H = 0x04
+KEY_Y = 0x10
+KEY_P = 0x23
+KEY_L = 0x25
+KEY_K = 0x28
+KEY_N = 0x2D
 
-# ⌘⌥←/→ JetBrains (Navigate Back/Forward) ve Chrome (sekme) ile çakıştığı için ⌃⌥⌘ kullanılır.
+# ⌘⌥←/→ JetBrains (Navigate Back/Forward) ve Chrome (sekme) ile çakıştığı için ⌃⌥⌘ kullanılır. Sol el ⌃⌥⌘'yi
+# tuttuğu için harfler klavyenin sağ yarısından seçildi (sahip, 2026-11-22).
 _HYPER = CONTROL | OPTION | CMD
+_PREFIX = "⌃ + ⌥ + ⌘ + "
 DEFAULT_BINDINGS = {
-    "prev": (KEY_LEFT, _HYPER, "⌃⌥⌘←"),
-    "next": (KEY_RIGHT, _HYPER, "⌃⌥⌘→"),
-    "toggle_interactive": (KEY_UP, _HYPER, "⌃⌥⌘↑"),
-    "screensaver_now": (KEY_DOWN, _HYPER, "⌃⌥⌘↓"),
+    "prev": (KEY_LEFT, _HYPER, _PREFIX + "←"),
+    "next": (KEY_RIGHT, _HYPER, _PREFIX + "→"),
+    "toggle_interactive": (KEY_K, _HYPER, _PREFIX + "K"),
+    "screensaver_now": (KEY_L, _HYPER, _PREFIX + "L"),
+    "toggle_pause": (KEY_P, _HYPER, _PREFIX + "P"),
+    "toggle_wallpaper": (KEY_H, _HYPER, _PREFIX + "H"),
+    "reload": (KEY_Y, _HYPER, _PREFIX + "Y"),
+    "next_source": (KEY_N, _HYPER, _PREFIX + "N"),
 }
 
 _carbon.GetApplicationEventTarget.restype = ctypes.c_void_p

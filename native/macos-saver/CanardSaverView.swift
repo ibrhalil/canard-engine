@@ -43,6 +43,7 @@ final class CanardSaverView: ScreenSaverView {
     private var timebase: CMTimebase?
     private var timebaseRunning = false
     private var resyncs = 0
+    private var refusal: (message: String, at: Date)?  // Canard çalışıyor ama yayını reddetti (ör. yayın kapalı)
 
     override init?(frame: NSRect, isPreview: Bool) {
         super.init(frame: frame, isPreview: isPreview)
@@ -131,8 +132,10 @@ final class CanardSaverView: ScreenSaverView {
             halt("bekçi: animateOneFrame gelmiyor")
             return
         }
-        if connection == nil {
-            setMessage("Canard çalışmıyor\nDuvar kağıdını başlat:  uv run canard --mode wallpaper")
+        if let refusal, now.timeIntervalSince(refusal.at) < 5 {
+            setMessage("Canard: \(refusal.message)")  // yeniden denemeler arasında "çalışmıyor"a dönmesin
+        } else if connection == nil {
+            setMessage("Canard çalışmıyor\nCanard uygulamasını aç  ·  ya da: uv run canard --mode wallpaper")
         } else if now.timeIntervalSince(lastFrameAt) > watchdogSeconds && now.timeIntervalSince(connectedAt) > watchdogSeconds {
             setMessage("Canard'dan görüntü bekleniyor…")
         }
@@ -253,7 +256,10 @@ final class CanardSaverView: ScreenSaverView {
         case UInt8(ascii: "E"):
             let message = String(data: payload, encoding: .utf8) ?? "?"
             saverLog.log("[\(self.sid, privacy: .public)] Canard reddetti: \(message, privacy: .public)")
-            DispatchQueue.main.async { self.setMessage("Canard: \(message)") }
+            DispatchQueue.main.async {
+                self.refusal = (message, Date())
+                self.setMessage("Canard: \(message)")
+            }
         default:
             break
         }
@@ -310,6 +316,7 @@ final class CanardSaverView: ScreenSaverView {
         renderer.enqueue(sample)
         frames += 1
         lastFrameAt = Date()
+        refusal = nil
         setMessage(nil)
     }
 

@@ -4,6 +4,7 @@ from PySide6.QtCore import QFile, QIODevice
 from PySide6.QtWebEngineCore import QWebEngineScript
 
 _SHIM = Path(__file__).with_name("system_audio.js")
+SCRIPT_NAME = "canard-system-audio"
 
 
 def _qwebchannel_source() -> str:
@@ -22,10 +23,17 @@ def script_source() -> str:
 
 
 def install(profile) -> None:
+    uninstall(profile)
     script = QWebEngineScript()
-    script.setName("canard-system-audio")
+    script.setName(SCRIPT_NAME)
     script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
     script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
     script.setRunsOnSubFrames(False)
     script.setSourceCode(script_source())
     profile.scripts().insert(script)
+
+
+def uninstall(profile) -> None:
+    from canard.web.bridge import remove_scripts
+
+    remove_scripts(profile, SCRIPT_NAME)

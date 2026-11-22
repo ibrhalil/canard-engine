@@ -123,6 +123,10 @@ class WebHost(QWidget):
         self._stack.setCurrentIndex(0)
         self.view.load(QUrl(url))
 
+    def set_boot_script(self, boot_script: str | None) -> None:
+        """Sonraki yüklemede geçerli olur."""
+        self._boot_script = boot_script
+
     def retry(self) -> None:
         if self._current_url:
             self.load(self._current_url)
