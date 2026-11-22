@@ -29,6 +29,10 @@ _SCREEN_SETTLE_MS = 500
 # Çıkarılan ekranın sayfası kapatılmaz, dondurulup park edilir: aynı ekran geri takılınca kaldığı yerden
 # sürer (içeriğin sessionStorage'ı, ör. mscillus seçili modu, korunur). Bu süre içinde dönmezse atılır.
 _PARK_SECONDS = 600
+# Örtülü → görünür sonrası pencere tazelenmeden önce beklenen süre ve tazelemenin kendi görünürlük olaylarının
+# yok sayıldığı süre (bkz. _refresh_window).
+_REFRESH_DELAY_MS = 250
+_REFRESH_SETTLE_MS = 500
 # Canard.saver yayını açıkken "örtülü" olayında sayfa hemen dondurulmaz: ekran koruyucu başlayınca macOS duvar kağıdını
 # önce örtülü bildirir, Canard.saver ~1 sn sonra bağlanır (2026-11-22 sahip testi: 14:59:48 örtülü → 14:59:49 bağlandı).
 # Hemen dondurmak sistem sesini ~1 sn kesiyordu; bu sürede bağlanırsa sayfa hiç durmaz.
@@ -71,6 +75,7 @@ class WallpaperManager(QObject):
         self._park_timer.setInterval(60_000)
         self._park_timer.timeout.connect(self._expire_parked)
         self.occlusion_grace_ms = 0  # Runtime, yayın açıkken OCCLUSION_GRACE_MS verir
+        self._refreshing: set[int] = set()  # pencere tazelenirken (id(host)), bkz. _refresh_window
         self._pending_pause: dict[int, QTimer] = {}  # id(host) → bekleyen dondurma
         app = QGuiApplication.instance()
         app.screenAdded.connect(self._schedule_sync)
@@ -410,6 +415,8 @@ class WallpaperManager(QObject):
         window.layout().setContentsMargins(0, max(0, top), 0, 0)
 
     def _on_visibility(self, host: WebHost, screen_name: str, visible: bool) -> None:
+        if id(host) in self._refreshing:
+            return  # _refresh_window'un kendi görünürlük olayları
         self._cancel_pause(host)
         if id(host) in self._parked_hosts:
             return  # ekranı çıkarılmış pencere: AppKit taşırken gelen görünürlük olayları yok sayılır
@@ -432,7 +439,30 @@ class WallpaperManager(QObject):
                       self.occlusion_grace_ms)
             return
         host.set_suspended(not visible)
+        if visible:
+            QTimer.singleShot(_REFRESH_DELAY_MS, host, lambda: self._refresh_window(host, screen_name))
         log.info("%s: %s", screen_name, "devam" if visible else "duraklatıldı (örtülü)")
+
+    def _refresh_window(self, host: WebHost, screen_name: str) -> None:
+        """Örtülü → görünür sonrası pencerenin ekrandaki görüntüsünü tazeler. 2026-11-22 sahip testi: IntelliJ öne gelip
+        gidince duvar kağıdı ekranda son karede kalıyordu; sayfa, ses ve Qt çizimi sağlamdı (600 ms'de 37 kare,
+        exposed=True, Canard.saver yayını aynı anda canlı), yalnız macOS pencerenin eski görüntüsünü gösteriyordu.
+        ⌃⌥⌘H (pencere gizle/göster) düzeltiyordu; burada kendiliğinden yapılır: macOS'ta yalnız AppKit düzeyinde
+        yeniden sıralama (titremesiz), yoksa Qt gizle/göster."""
+        entry = next((e for e in self._windows if e[1] is host), None)
+        if (entry is None or host._suspended or id(host) in self._streaming or id(host) in self._parked_hosts
+                or not self._adapter.window_visible(entry[0])):
+            return
+        window = entry[0]
+        self._refreshing.add(id(host))
+        try:
+            self._adapter.refresh_wallpaper_window(window)
+        except NotImplementedError:
+            window.hide()
+            window.show()
+            self._adapter.apply_wallpaper_window(window, interactive=self._interactive)
+        QTimer.singleShot(_REFRESH_SETTLE_MS, host, lambda: self._refreshing.discard(id(host)))
+        log.debug("%s: pencere tazelendi", screen_name)
 
     def _pause(self, host: WebHost, screen_name: str) -> None:
         self._cancel_pause(host)

@@ -77,6 +77,11 @@ class MacAdapter(PlatformAdapter):
 
         return is_visible(widget)
 
+    def refresh_wallpaper_window(self, widget) -> None:
+        from canard.platform.macos.wallpaper import reorder_window
+
+        reorder_window(widget)
+
     def create_video_encoder(self, width: int, height: int, fps: int, bitrate: int, on_output):
         from canard.platform.macos.video import HevcEncoder
 

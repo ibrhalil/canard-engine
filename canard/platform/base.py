@@ -57,6 +57,10 @@ class PlatformAdapter:
     def window_visible(self, widget) -> bool:
         raise NotImplementedError
 
+    def refresh_wallpaper_window(self, widget) -> None:
+        """Pencerenin ekrandaki görüntüsünü tazeler (bkz. WallpaperManager._refresh_window)."""
+        raise NotImplementedError
+
     def create_video_encoder(self, width: int, height: int, fps: int, bitrate: int, on_output):
         raise NotImplementedError
 

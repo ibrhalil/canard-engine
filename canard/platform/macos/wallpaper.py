@@ -1,3 +1,5 @@
+import logging
+
 import objc
 from AppKit import (
     NSNotificationCenter,
@@ -8,7 +10,14 @@ from AppKit import (
     NSWindowDidChangeOcclusionStateNotification,
     NSWindowOcclusionStateVisible,
 )
-from Quartz import CGWindowLevelForKey, kCGDesktopIconWindowLevelKey
+from Quartz import (
+    CGWindowListCopyWindowInfo,
+    CGWindowLevelForKey,
+    kCGDesktopIconWindowLevelKey,
+    kCGWindowListOptionOnScreenAboveWindow,
+)
+
+log = logging.getLogger("canard.wallpaper")
 
 
 def _ns_window(widget):
@@ -37,12 +46,49 @@ def observe_occlusion(widget, callback):
     window = _ns_window(widget)
 
     def on_change(_notification):
-        callback(bool(window.occlusionState() & NSWindowOcclusionStateVisible))
+        visible = bool(window.occlusionState() & NSWindowOcclusionStateVisible)
+        if not visible:
+            log.debug("örtülü bildirimi, üstteki pencereler: %s", _covering_windows(window))
+        callback(visible)
 
     token = NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
         NSWindowDidChangeOcclusionStateNotification, window, None, on_change
     )
     return token, on_change
+
+
+def _covering_windows(window, limit: int = 10) -> str:
+    """Tanı: macOS duvar kağıdını "örtülü" dediğinde üstünde ekranı kaplayan pencereler (sahip, katman, ekranın yüzde
+    kaçı, saydamlık). Yanlış "örtülü" bildirimlerinin kaynağını bulmak için (2026-11-22: IntelliJ öne gelince donma)."""
+    try:
+        frame = window.frame()
+        main_height = NSScreen.screens()[0].frame().size.height  # Cocoa sol-alt → CG sol-üst
+        left, top = frame.origin.x, main_height - frame.origin.y - frame.size.height
+        right, bottom = left + frame.size.width, top + frame.size.height
+        area = frame.size.width * frame.size.height or 1
+        found = []
+        for info in CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenAboveWindow, window.windowNumber()) or ():
+            bounds = info.get("kCGWindowBounds") or {}
+            x, y = bounds.get("X", 0), bounds.get("Y", 0)
+            overlap = (max(0, min(right, x + bounds.get("Width", 0)) - max(left, x))
+                       * max(0, min(bottom, y + bounds.get("Height", 0)) - max(top, y)))
+            if overlap / area >= 0.25:
+                name = info.get("kCGWindowName") or ""
+                found.append(f"{info.get('kCGWindowOwnerName', '?')}{f' «{name[:30]}»' if name else ''}"
+                             f" katman={info.get('kCGWindowLayer')} %{100 * overlap / area:.0f}"
+                             f" alfa={info.get('kCGWindowAlpha', 1):.2g}")
+        return "; ".join(found[:limit]) + (f" (+{len(found) - limit})" if len(found) > limit else "") or "yok"
+    except Exception as error:  # tanı satırı uygulamayı asla düşürmesin
+        return f"okunamadı: {error!r}"
+
+
+def reorder_window(widget) -> None:
+    """Pencereyi yalnız AppKit düzeyinde kapatıp aynı anda yeniden öne alır: WindowServer pencerenin güncel içeriğini
+    yeniden bağlar. Qt'ye gizle/göster gitmediği için sayfa görünürlüğü değişmez ve arada sistem duvar kağıdı
+    görünmez (Qt hide/show kısa bir titreme veriyordu)."""
+    window = _ns_window(widget)
+    window.orderOut_(None)
+    window.orderFrontRegardless()
 
 
 def is_visible(widget) -> bool:
