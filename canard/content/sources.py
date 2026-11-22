@@ -1,3 +1,9 @@
+import uuid
+from pathlib import Path
+from urllib.parse import urlparse
+
+from canard.i18n import t
+
 REMOTE = "remote"
 BUILD = "build"
 DEVSERVER = "devserver"
@@ -48,8 +54,6 @@ class ContentSource:
 
 
 def from_url(url: str, name: str | None = None) -> ContentSource:
-    from urllib.parse import urlparse
-
     parsed = urlparse(url)
     return ContentSource(
         id=_new_id(),
@@ -60,8 +64,6 @@ def from_url(url: str, name: str | None = None) -> ContentSource:
 
 
 def from_build(path: str, name: str | None = None) -> ContentSource:
-    from pathlib import Path
-
     resolved = Path(path).expanduser().resolve()
     return ContentSource(
         id=_new_id(),
@@ -72,29 +74,26 @@ def from_build(path: str, name: str | None = None) -> ContentSource:
 
 
 def validate(source: ContentSource) -> list[str]:
-    from pathlib import Path
-    from urllib.parse import urlparse
-
     errors: list[str] = []
     if source.type not in _TYPES:
-        errors.append(f"Bilinmeyen kaynak türü: {source.type}")
+        errors.append(t("Unknown source type: {type}", type=source.type))
         return errors
     if source.type == BUILD:
         if not source.path:
-            errors.append("build kaynağı için klasör yolu gerekli")
+            errors.append(t("A build source needs a folder path"))
         else:
             root = Path(source.path)
             if not root.is_dir():
-                errors.append(f"Klasör yok: {root}")
+                errors.append(t("Folder not found: {path}", path=root))
             elif not (root / "index.html").is_file():
-                errors.append(f"Klasörde index.html yok: {root}")
+                errors.append(t("No index.html in folder: {path}", path=root))
     else:
         if not source.url:
-            errors.append(f"{source.type} kaynağı için URL gerekli")
+            errors.append(t("A {type} source needs a URL", type=source.type))
         else:
             parsed = urlparse(source.url)
             if parsed.scheme not in ("http", "https"):
-                errors.append("URL http/https şemasıyla başlamalı")
+                errors.append(t("The URL must start with http:// or https://"))
     return errors
 
 
@@ -103,8 +102,6 @@ def resolve_load_url(source: ContentSource, servers) -> str:
     if errors:
         raise SourceError("; ".join(errors))
     if source.type == BUILD:
-        from pathlib import Path
-
         server = servers.server_for(Path(source.path), source.port or 0)
         source.port = server.port
         return server.url + "/"
@@ -112,8 +109,6 @@ def resolve_load_url(source: ContentSource, servers) -> str:
 
 
 def _new_id() -> str:
-    import uuid
-
     return uuid.uuid4().hex[:12]
 
 
@@ -149,7 +144,7 @@ class SourceRegistry:
 
     def update(self, source: ContentSource) -> None:
         if source.id not in self._sources:
-            raise SourceError(f"Kaynak bulunamadı: {source.id}")
+            raise SourceError(t("Source not found: {id}", id=source.id))
         self._sources[source.id] = source
         self._persist()
 
@@ -168,7 +163,7 @@ class SourceRegistry:
 
     def set_active(self, source_id: str) -> None:
         if source_id not in self._sources:
-            raise SourceError(f"Kaynak bulunamadı: {source_id}")
+            raise SourceError(t("Source not found: {id}", id=source_id))
         self._store.set("active_source_id", source_id)
         self._persist()
 

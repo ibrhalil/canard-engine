@@ -1,8 +1,5 @@
-// Canard sistem sesi köprüsü. qwebchannel.js ile aynı IIFE içine sarılarak enjekte edilir
-// (bkz. canard/web/system_audio.py); sayfanın global alanına yalnız getDisplayMedia değişikliği yansır.
-//
-// getDisplayMedia({audio: true}) çağrısı, motorun yakaladığı sistem sesini taşıyan bir MediaStream ile
-// karşılanır. İçerik (ör. mscillus "Sistem sesi") hiçbir değişiklik yapmadan çalışır.
+// Canard sistem sesi köprüsü: getDisplayMedia({audio: true}) motorun yakaladığı sistem sesini taşıyan bir
+// MediaStream döndürür, içerik değişiklik gerektirmez. qwebchannel.js ile aynı IIFE'de enjekte edilir.
 var mediaDevices = navigator.mediaDevices;
 if (mediaDevices && typeof MediaStreamTrackGenerator === 'function' && typeof AudioData === 'function') {
   var originalGetDisplayMedia = mediaDevices.getDisplayMedia ? mediaDevices.getDisplayMedia.bind(mediaDevices) : null;

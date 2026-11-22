@@ -93,8 +93,7 @@ class MacAdapter(PlatformAdapter):
         return app
 
     def before_gui(self) -> None:
-        # Menülerin ortak ✓ görseli Qt'nin pencere katmanı yüklendikten sonra ilk kez çözülürse 4×3 pt çıkıyor ve ✓
-        # görünmüyor (Qt'siz 18×17; 2026-11-22 ölçüm). Qt'den önce bir kez çözülünce önbellekte doğru boyutta kalır.
+        # Menü ✓ görseli Qt yüklendikten sonra ilk kez çözülürse yanlış boyutta önbelleğe giriyor.
         from AppKit import NSImage
 
         NSImage.imageNamed_("NSMenuCheckmark")

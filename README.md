@@ -1,31 +1,45 @@
-# Canard — CANvas boARD engine
+# Canard
 
-Web tabanlı içerikleri (uzak URL, yerel production build, dev sunucusu, paketlenmiş içerik) **canlı duvar kağıdı** ve **ekran koruyucusu** olarak masaüstünde çalıştıran, Python çekirdekli, açık ve genişletilebilir bir motor.
+Canard runs any web content — a remote site, a local production build or a dev server — as a **live desktop wallpaper** and a **real screensaver**. One Python core (PySide6 + Qt WebEngine) with thin per-OS adapters.
 
-- Windows · macOS · Linux — tek Python çekirdeği, platform başına ince adapter katmanları
-- Gerçek masaüstü entegrasyonu: macOS'ta simgelerin arkasında pencere, yerel `.saver`; Windows'ta WorkerW + `.scr`; Linux'ta X11/Wayland (Faz 2b/2c)
-- İçerikten bağımsız: ilk örnek içerik [mscillus](https://github.com/ibrhalil/mscillus) müzik görselleştirici; motor herhangi bir web kaynağını çalıştırır
+- **Live wallpaper** behind the desktop icons, one page per screen, paused automatically when covered.
+- **Real macOS screensaver** (`Canard.saver`) that keeps showing the live page on the lock screen.
+- **System audio** for the content: `getDisplayMedia({audio: true})` receives what the computer is playing, so audio visualizers work unchanged.
+- **Menu bar app** with global shortcuts; English and Turkish interface.
 
-## Durum
+First sample content: [mscillus](https://github.com/ibrhalil/mscillus), a music visualizer.
 
-macOS: Faz 1 (web renderer), Faz 2a (duvar kağıdı), Faz 3a (ekran koruyucu) ve Faz 4a (sistem sesi) tamamlandı. Faz planı ve tüm kararlar: [PLAN.md](PLAN.md) · Gereksinimler: [docs/PROMPT.md](docs/PROMPT.md)
+## Status
 
-## Hızlı başlangıç
+| Platform | State |
+|---|---|
+| macOS 14+ | Wallpaper, screensaver, system audio (14.2+), menu bar app — working |
+| Windows | Planned |
+| Linux | Planned (X11 first, Wayland best effort) |
+
+Roadmap and decisions: [PLAN.md](PLAN.md) (Turkish) · Requirements: [docs/PROMPT.md](docs/PROMPT.md) (Turkish)
+
+## Quick start (macOS)
+
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
-native/macos-app/build.sh --install && open ~/Applications/Canard.app   # menü çubuğu uygulaması (terminalsiz)
-uv run canard --url https://ornek.site                       # önizleme penceresi
-uv run canard --mode wallpaper                               # aktif kaynağı duvar kağıdı yap
-uv run canard --mode wallpaper --boot-file tools/mscillus-boot-system.js   # mscillus + sistem sesi
+native/macos-app/build.sh --install && open ~/Applications/Canard.app   # menu bar app
+uv run canard --url https://example.com                                 # preview window
+uv run canard --mode wallpaper                                          # active source as wallpaper
 ```
 
-- **Sistem sesi (macOS 14.2+):** içerik `getDisplayMedia({audio: true})` istediğinde motor sistem sesini verir; mscillus'un "Sistem sesi" kartı değişiklik gerekmeden çalışır.
-- **Ekran koruyucu:** `Canard.saver` macOS'un gerçek ekran koruyucusu olarak duvar kağıdı içeriğini kilit ekranında da gösterir (`native/macos-saver/build.sh --open`); alternatif: `--screensaver-after` ile Canard'ın kendi boşta tam ekranı.
-- **Menü çubuğu ve kısayollar:** duvar kağıdı, duraklatma, ekran seçimi, kaynak ve ekran koruyucu menüden; `⌃ + ⌥ + ⌘ + K` etkileşimli mod, `L` ekran koruyucu + kilit, `P` duraklat, `←/→` içeriğe tuş (tam liste KULLANIM'da). Örtülünce (tam ekran uygulama) içerik duraklatılır.
+## Documentation
 
-Tüm komutlar, örnekler ve sorun giderme: **[docs/KULLANIM.md](docs/KULLANIM.md)** · Yetki ve izinler: **[docs/IZINLER.md](docs/IZINLER.md)**
+- [Usage](docs/USAGE.md) — menu, command line, shortcuts, screensaver, troubleshooting
+- [Permissions & privacy](docs/PERMISSIONS.md) — macOS permissions, what content may access, stored data
+- [Architecture](docs/ARCHITECTURE.md) — how it works, platform notes, known limits
 
-## Lisans
+## Privacy
 
-GPL-3.0 — bkz. [LICENSE](LICENSE)
+Canard collects no data; everything stays on this computer. See [Permissions & privacy](docs/PERMISSIONS.md).
+
+## License
+
+GPL-3.0 — see [LICENSE](LICENSE).

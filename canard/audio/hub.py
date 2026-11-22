@@ -1,16 +1,14 @@
-"""Sistem sesini sayfalara dağıtan merkez.
-
-Yakalama yalnızca en az bir sayfa ses istiyor ve duraklatılmamışken çalışır. Ses QWebChannel
-üzerinden base64 float32 PCM olarak iletilir: açık port ve token yok, başka süreç dinleyemez.
-"""
+"""Sistem sesini sayfalara dağıtır. Yakalama yalnız ses isteyen, duraklatılmamış sayfa varken çalışır; ses
+QWebChannel üzerinden base64 float32 PCM gider (açık port yok)."""
 
 import base64
 import logging
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-# ~20 ms'lik paketler: tap 512 karelik (~10.7 ms) tamponları ikişer ikişer gönderilir.
-_BATCH_SECONDS = 0.02
+from canard.i18n import t
+
+_BATCH_SECONDS = 0.02  # tap'in ~10.7 ms'lik tamponları ikişer gönderilir
 
 log = logging.getLogger("canard.audio")
 
@@ -84,14 +82,14 @@ class SystemAudioHub(QObject):
 
     def update(self) -> dict:
         wanted = any(p.active for p in self._pages)
-        log.debug("abone sayfa: %d/%d etkin", sum(p.active for p in self._pages), len(self._pages))
+        log.debug("subscribed pages: %d/%d active", sum(p.active for p in self._pages), len(self._pages))
         if wanted and self._format is None:
             self._start()
         elif not wanted and self._format is not None:
             self._stop()
         if self._format is not None:
             return {"ok": True, **self._format}
-        return {"ok": False, "error": self._error or "Sistem sesi başlatılamadı"}
+        return {"ok": False, "error": self._error or t("System audio could not be started")}
 
     def shutdown(self) -> None:
         self._pages.clear()
@@ -103,20 +101,20 @@ class SystemAudioHub(QObject):
                 self._capture = self._adapter.create_system_audio(self._captured.emit, self._deviceChanged.emit)
             fmt = self._capture.start()
         except NotImplementedError:
-            self._error = "Bu platformda sistem sesi yakalama henüz yok"
+            self._error = t("System audio capture is not available on this platform yet")
             return
         except Exception as error:
-            self._error = f"Sistem sesi başlatılamadı: {error}"
+            self._error = t("System audio could not be started: {error}", error=error)
             log.error("%s", self._error, exc_info=True)
             return
         self._set_format(fmt)
-        log.info("sistem sesi yakalanıyor (%.0f Hz, %d kanal)", fmt.sample_rate, fmt.channels)
+        log.info("capturing system audio (%.0f Hz, %d channels)", fmt.sample_rate, fmt.channels)
         self.started.emit()
 
     def _stop(self) -> None:
         if self._capture is not None and self._format is not None:
             self._capture.stop()
-            log.info("sistem sesi durdu")
+            log.info("system audio stopped")
         self._format = None
         self._pending.clear()
 
@@ -145,13 +143,13 @@ class SystemAudioHub(QObject):
         try:
             fmt = self._capture.restart()
         except Exception as error:
-            self._error = f"Çıkış aygıtı değişti, sistem sesi yeniden kurulamadı: {error}"
+            self._error = t("Output device changed, system audio could not be restarted: {error}", error=error)
             log.error("%s", self._error, exc_info=True)
             self._format = None
             return
         previous = self._format
         self._set_format(fmt)
-        log.info("çıkış aygıtı değişti, yakalama yeniden kuruldu")
+        log.info("output device changed, capture restarted")
         if previous != self._format:
             for page_audio in self._pages:
                 page_audio.formatChanged.emit(self._format)

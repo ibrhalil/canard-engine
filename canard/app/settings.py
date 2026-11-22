@@ -46,6 +46,3 @@ class SettingsStore:
 
     def set(self, key: str, value) -> None:
         self._data[key] = value
-
-    def delete(self, key: str) -> None:
-        self._data.pop(key, None)

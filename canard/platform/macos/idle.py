@@ -1,8 +1,4 @@
-"""Boşta tam ekran ekran koruyucu (Faz 3a, yol A) için macOS yardımcıları.
-
-Gerçek entegrasyon değildir: macOS kilitli oturumda uygulama pencerelerini gizler (spike test 2), bu
-yüzden Canard sistem ekran koruyucusunun yerine değil, ondan önce kendi boşluk sayacıyla çalışır.
-"""
+"""Boşta tam ekran (`--screensaver-after`) için macOS yardımcıları: boşluk süresi, uyku engelleri, oturum olayları."""
 
 import ctypes
 import ctypes.util

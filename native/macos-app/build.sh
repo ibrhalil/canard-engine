@@ -6,7 +6,7 @@
 #   native/macos-app/build.sh --install   → derle ve ~/Applications/Canard.app'e kur; Canard.saver kuruluysa onu da
 #                                           günceller ve ekran koruyucu sürecini yeniden başlatır (eski kodu bellekte tutar)
 # İmza: CANARD_SIGN_IDENTITY="<kod imzalama sertifikası adı>", verilmezse anahtar zincirinde "Canard Dev" varsa o
-# (kendinden imzalı; izin kararları yeniden derlemede korunur, bkz. docs/KULLANIM.md), o da yoksa ad-hoc (her yeniden
+# (kendinden imzalı; izin kararları yeniden derlemede korunur, bkz. docs/USAGE.md), o da yoksa ad-hoc (her yeniden
 # derlemeden sonra macOS izinleri tekrar sorabilir).
 set -euo pipefail
 here=${0:A:h}
@@ -27,7 +27,8 @@ cat > "$out/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleDevelopmentRegion</key><string>tr</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleLocalizations</key><array><string>en</string><string>tr</string></array>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleExecutable</key><string>Canard</string>
   <key>CFBundleIdentifier</key><string>dev.canard.app</string>
@@ -42,12 +43,19 @@ cat > "$out/Contents/Info.plist" <<PLIST
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>GPL-3.0</string>
-  <key>NSMicrophoneUsageDescription</key><string>Canard, gösterdiği web içeriği mikrofon istediğinde (ör. ses görselleştirici) sesi içeriğe iletir.</string>
-  <key>NSAudioCaptureUsageDescription</key><string>Canard, bilgisayarda çalan sesi duvar kağıdı ve ekran koruyucu içeriğine (ör. ses görselleştirici) iletir.</string>
-  <key>NSCameraUsageDescription</key><string>Canard, gösterdiği web içeriği kamera istediğinde görüntüyü içeriğe iletir.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Canard passes microphone audio to the web content it shows when the content asks for it (e.g. an audio visualizer).</string>
+  <key>NSAudioCaptureUsageDescription</key><string>Canard passes the audio playing on this computer to the wallpaper and screensaver content (e.g. an audio visualizer).</string>
+  <key>NSCameraUsageDescription</key><string>Canard passes the camera image to the web content it shows when the content asks for it.</string>
   <key>CanardRoot</key><string>$root</string>
 </dict></plist>
 PLIST
+mkdir -p "$out/Contents/Resources/tr.lproj"
+cat > "$out/Contents/Resources/tr.lproj/InfoPlist.strings" <<'STRINGS'
+"NSMicrophoneUsageDescription" = "Canard, gösterdiği web içeriği mikrofon istediğinde (ör. ses görselleştirici) sesi içeriğe iletir.";
+"NSAudioCaptureUsageDescription" = "Canard, bilgisayarda çalan sesi duvar kağıdı ve ekran koruyucu içeriğine (ör. ses görselleştirici) iletir.";
+"NSCameraUsageDescription" = "Canard, gösterdiği web içeriği kamera istediğinde görüntüyü içeriğe iletir.";
+STRINGS
+mkdir -p "$out/Contents/Resources/en.lproj"
 
 tmp=$(mktemp -d)
 for arch in arm64 x86_64; do
@@ -63,25 +71,25 @@ sign() {
   local output
   if ! output=$(codesign --force --sign "$identity" "$1" 2>&1); then
     print -u2 -- "$output"
-    print -u2 -- "imzalanamadı: $1 (kimlik: $identity)"
+    print -u2 -- "signing failed: $1 (identity: $identity)"
     exit 1
   fi
 }
 sign "$out/Contents/Resources/Canard.saver"
 sign "$out"
-echo "derlendi: $out (imza: ${identity/#-/ad-hoc})"
+echo "built: $out (signature: ${identity/#-/ad-hoc})"
 
 if [[ "${1:-}" == "--install" ]]; then
   target="$HOME/Applications/Canard.app"
   mkdir -p "$HOME/Applications"
   rm -rf "$target"
   ditto "$out" "$target"
-  echo "kuruldu: $target  (açmak için: open ~/Applications/Canard.app)"
+  echo "installed: $target  (open with: open ~/Applications/Canard.app)"
   saver="$HOME/Library/Screen Savers/Canard.saver"
   if [[ -d "$saver" ]]; then
     rm -rf "$saver"
     ditto "$out/Contents/Resources/Canard.saver" "$saver"
     killall legacyScreenSaver 2>/dev/null || true
-    echo "güncellendi: $saver (ekran koruyucu süreci yeniden başlatıldı)"
+    echo "updated: $saver (screensaver process restarted)"
   fi
 fi

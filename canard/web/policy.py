@@ -12,9 +12,7 @@ _ALLOWED = {
     QWebEnginePermission.PermissionType.DesktopAudioVideoCapture,
 }
 
-
-# Sayfa mikrofon/kamera isteyince çağrılır (ör. Runtime: işletim sistemi izni kapalıysa kullanıcıya söylemek için).
-media_listeners: list = []
+media_listeners: list = []  # sayfa mikrofon isteyince çağrılır (Runtime: OS izni kapalıysa kullanıcıya söyler)
 _MICROPHONE = {
     QWebEnginePermission.PermissionType.MediaAudioCapture,
     QWebEnginePermission.PermissionType.MediaAudioVideoCapture,
@@ -28,8 +26,8 @@ def decide(permission) -> None:
             listener("microphone")
     origin = permission.origin().toString()
     if kind in _ALLOWED:
-        log.debug("izin verildi: %s (%s)", kind.name, origin)
+        log.debug("permission granted: %s (%s)", kind.name, origin)
         permission.grant()
     else:
-        log.info("izin reddedildi: %s (%s)", kind.name, origin)
+        log.info("permission denied: %s (%s)", kind.name, origin)
         permission.deny()

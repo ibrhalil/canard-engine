@@ -11,18 +11,19 @@ root=${here:h:h}
 out="$root/build/Canard.saver"
 rm -rf "$out"
 mkdir -p "$out/Contents/MacOS" "$out/Contents/Resources"
-cat > "$out/Contents/Info.plist" <<'PLIST'
+version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$root/canard/__init__.py")
+cat > "$out/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleDevelopmentRegion</key><string>English</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
   <key>CFBundleExecutable</key><string>Canard</string>
   <key>CFBundleIdentifier</key><string>dev.canard.saver</string>
   <key>CFBundleName</key><string>Canard</string>
   <key>CFBundlePackageType</key><string>BNDL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>$version</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>NSPrincipalClass</key><string>CanardSaverView</string>
   <key>NSHumanReadableCopyright</key><string>GPL-3.0</string>

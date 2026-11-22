@@ -3,27 +3,30 @@ import logging
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QStandardPaths, Qt, QUrl
 from PySide6.QtWidgets import QLabel, QPushButton, QStackedLayout, QVBoxLayout, QWidget
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from canard.web.bridge import HostBridge
+from canard.i18n import t
 from canard.web.policy import decide as decide_permission
 
 log = logging.getLogger("canard.web")
 
 
 def data_location() -> Path:
-    from PySide6.QtCore import QStandardPaths
-
     return Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation))
+
+
+def web_data_location() -> Path:
+    """İçeriklerin localStorage, IndexedDB, çerez ve önbelleği (tüm kaynaklar tek profilde, origin'e göre ayrık)."""
+    return data_location() / "webprofile"
 
 
 def create_profile(persistent: bool = True) -> QWebEngineProfile:
     if persistent:
         profile = QWebEngineProfile("canard")
-        profile.setPersistentStoragePath(str(data_location() / "webprofile"))
+        profile.setPersistentStoragePath(str(web_data_location()))
         profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies)
     else:
         profile = QWebEngineProfile(None)
@@ -44,13 +47,12 @@ _CONSOLE_LEVELS = {
 
 class CanardPage(QWebEnginePage):
     def javaScriptConsoleMessage(self, level, message, line_number, source_id):
-        # Sayfa konsolu: hatalar uyarı, uyarılar bilgi, console.log debug düzeyinde. Canard'ın kendi
-        # boot/köprü mesajları ("[canard…") her zaman bilgi düzeyinde görünür.
+        # Canard'ın kendi boot/köprü mesajları ("[canard…") her zaman bilgi düzeyinde.
         log_level = _CONSOLE_LEVELS.get(level, logging.DEBUG)
         if message.startswith("[canard"):
             log_level = logging.INFO
         where = f"  ({source_id}:{line_number})" if source_id and log_level != logging.INFO else ""
-        log.log(log_level, "konsol: %s%s", message, where)
+        log.log(log_level, "console: %s%s", message, where)
 
 
 class WebHost(QWidget):
@@ -59,6 +61,7 @@ class WebHost(QWidget):
         self._current_url: str | None = None
         self._boot_script = boot_script
         self._suspended = False
+        self._load_started = time.monotonic()
         self._audio_hub = audio_hub
         self.page_audio = None
 
@@ -70,7 +73,7 @@ class WebHost(QWidget):
         self._error_label = QLabel()
         self._error_label.setWordWrap(True)
         self._error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        retry_button = QPushButton("Yeniden Dene")
+        self._retry_button = retry_button = QPushButton()
         retry_button.clicked.connect(self.retry)
         overlay = QWidget()
         layout = QVBoxLayout(overlay)
@@ -107,24 +110,21 @@ class WebHost(QWidget):
     def _on_desktop_media_requested(self, request) -> None:
         model = request.screensModel()
         if model.rowCount() > 0:
-            log.debug("ekran paylaşımı istendi: ilk ekran seçildi")
+            log.debug("screen sharing requested: first screen selected")
             request.selectScreen(model.index(0, 0))
         else:
-            log.warning("ekran paylaşımı istendi ama paylaşılacak ekran yok")
+            log.warning("screen sharing requested but there is no screen to share")
             request.cancel()
-
-    def install_bridge(self, bridge: HostBridge) -> None:
-        bridge.install(self.page.profile())
 
     def load(self, url: str) -> None:
         self._current_url = url
         self._load_started = time.monotonic()
-        log.debug("yükleniyor: %s", url)
+        log.debug("loading: %s", url)
         self._stack.setCurrentIndex(0)
         self.view.load(QUrl(url))
 
     def set_boot_script(self, boot_script: str | None) -> None:
-        """Sonraki yüklemede geçerli olur."""
+        """Sonraki yüklemede geçerli."""
         self._boot_script = boot_script
 
     def retry(self) -> None:
@@ -132,19 +132,22 @@ class WebHost(QWidget):
             self.load(self._current_url)
 
     def send_key(self, key: str) -> None:
-        # Sentetik keydown/keyup: document'a gönderilir, window dinleyicilerine de kabarcıklanır.
         self.page.runJavaScript(
             "(function(k){var o={key:k,code:k,bubbles:true,cancelable:true};"
             "document.dispatchEvent(new KeyboardEvent('keydown',o));"
             "document.dispatchEvent(new KeyboardEvent('keyup',o));})(%s);" % json.dumps(key)
         )
 
+    @property
+    def suspended(self) -> bool:
+        return self._suspended
+
     def set_suspended(self, suspended: bool) -> None:
-        # Görünmez sayfa: visibilityState=hidden, rAF durur; ardından Frozen ile JS görevleri de durur.
+        # Görünmez: rAF durur; Frozen: JS görevleri de durur.
         if suspended == self._suspended:
             return
         self._suspended = suspended
-        log.debug("sayfa %s", "donduruldu (görünmez + Frozen)" if suspended else "etkin")
+        log.debug("page %s", "frozen (hidden + Frozen)" if suspended else "active")
         if self.page_audio is not None:
             self.page_audio.set_paused(suspended)
         if suspended:
@@ -155,22 +158,23 @@ class WebHost(QWidget):
             self.page.setVisible(True)
 
     def _on_load_finished(self, ok: bool) -> None:
-        elapsed = time.monotonic() - getattr(self, "_load_started", time.monotonic())
+        elapsed = time.monotonic() - self._load_started
         if ok:
-            log.debug("yüklendi (%.1f sn): %s", elapsed, self.page.url().toString())
+            log.debug("loaded (%.1f s): %s", elapsed, self.page.url().toString())
             self._stack.setCurrentIndex(0)
             if self._boot_script:
-                log.debug("boot script çalıştırılıyor")
+                log.debug("running boot script")
                 self.page.runJavaScript(self._boot_script)
         else:
-            log.error("içerik yüklenemedi (%.1f sn): %s", elapsed, self._current_url)
+            log.error("content failed to load (%.1f s): %s", elapsed, self._current_url)
             self._show_error()
 
     def _on_render_terminated(self, status=None, exit_code=None, *args) -> None:
-        log.error("sayfa süreci sonlandı: durum=%s, çıkış kodu=%s (%s)",
+        log.error("page process terminated: status=%s, exit code=%s (%s)",
                   getattr(status, "name", status), exit_code, self._current_url)
         self._show_error()
 
     def _show_error(self) -> None:
-        self._error_label.setText(f"İçerik yüklenemedi:\n{self._current_url or ''}")
+        self._error_label.setText(t("Content could not be loaded:\n{url}", url=self._current_url or ""))
+        self._retry_button.setText(t("Retry"))
         self._stack.setCurrentIndex(1)

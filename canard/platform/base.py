@@ -1,15 +1,5 @@
 import sys
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class ScreenInfo:
-    name: str
-    x: int
-    y: int
-    width: int
-    height: int
-    device_pixel_ratio: float
+from functools import cache
 
 
 class PlatformAdapter:
@@ -64,38 +54,18 @@ class PlatformAdapter:
     def create_video_encoder(self, width: int, height: int, fps: int, bitrate: int, on_output):
         raise NotImplementedError
 
-    # Menü çubuğu uygulaması (canard --tray): arka plan uygulaması, oturum açılışı, ekran koruyucu kurulumu.
-    # Dönen nesne: set_accessory, bring_to_front, login_item_enabled, set_login_item, saver_installed,
-    # saver_package, install_saver, open_screensaver_settings, open_lock_screen_settings, start_screensaver,
-    # screen_lock_delay, permission_status, open_privacy_settings (bkz. canard/platform/macos/app.py).
     def app_integration(self):
+        """Menü çubuğu uygulaması yardımcıları (oturum açılışı, Canard.saver kurulumu, izinler); bkz. macos/app.py."""
         raise NotImplementedError
 
     def before_gui(self) -> None:
         """QApplication oluşturulmadan hemen önce platforma özgü hazırlık (varsayılan: yok)."""
 
-    def screens(self) -> list[ScreenInfo]:
-        from PySide6.QtGui import QGuiApplication
 
-        result = []
-        for screen in QGuiApplication.screens():
-            geometry = screen.geometry()
-            result.append(
-                ScreenInfo(
-                    name=screen.name(),
-                    x=geometry.x(),
-                    y=geometry.y(),
-                    width=geometry.width(),
-                    height=geometry.height(),
-                    device_pixel_ratio=screen.devicePixelRatio(),
-                )
-            )
-        return result
-
-
+@cache
 def detect() -> PlatformAdapter:
     if sys.platform == "darwin":
         from canard.platform.macos.adapter import MacAdapter
 
         return MacAdapter()
-    raise NotImplementedError(f"Platform henüz desteklenmiyor: {sys.platform}")
+    raise NotImplementedError(f"platform not supported yet: {sys.platform}")

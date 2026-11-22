@@ -1,11 +1,9 @@
-"""Donanım HEVC kodlayıcı (VideoToolbox) — ekran koruyucu kare yayını için.
+"""Donanım HEVC kodlayıcı (VideoToolbox), ekran koruyucu kare yayını için.
 
-pyobjc tuzakları (tools/saver-probe ölçümlerinde bulundu):
-- VTCompressionSession opak işaretçi döner; özellikler ctypes `VTSessionSetProperty` + CF nesneleriyle verilir
-  (pyobjc yolu -12902 döndürür; VT anahtar sabitleri ve NSNumber'lar Python türüne dönüşür),
-- VT çıktı geri çağrısı arka plan iş parçacığında çalışır; pyobjc fonksiyonları orada ilk kez aranırsa
-  KeyError ile süreç düşer → hepsi modül yüklenirken çözülür; geri çağrıda istisna dışarı sızmaz,
-- CVPixelBuffer satırları 64 bayt hizalıdır (ör. 3420 px: 13696 ≠ QImage 13680) → satır satır kopya.
+pyobjc tuzakları:
+- özellikler ctypes `VTSessionSetProperty` + CF nesneleriyle verilir (pyobjc yolu -12902 döndürüyor),
+- çıktı geri çağrısı arka plan iş parçacığında: pyobjc işlevleri modül yüklenirken çözülür, istisna sızmaz,
+- CVPixelBuffer satırları 64 bayt hizalı olabilir → gerekirse satır satır kopya.
 """
 
 import ctypes
@@ -20,7 +18,7 @@ import Quartz
 import VideoToolbox as VT
 
 log = logging.getLogger("canard.saver")
-# VTCompressionSession pyobjc'de opak işaretçi; her oturumda basılan uyarı bilinen ve zararsız durum.
+# VTCompressionSession pyobjc'de opak işaretçi; uyarı zararsız.
 warnings.filterwarnings("ignore", category=objc.ObjCPointerWarning)
 
 _cv = ctypes.CDLL(ctypes.util.find_library("CoreVideo"))
@@ -57,7 +55,6 @@ _NOT_SYNC = CM.kCMSampleAttachmentKey_NotSync
 _encode = VT.VTCompressionSessionEncodeFrameWithOutputHandler
 _make_time = CM.CMTimeMake
 _get_pts = CM.CMSampleBufferGetPresentationTimeStamp
-# Yeni bağlanan Canard.saver'a beklemeden anahtar kare (pyobjc sözlüğü CFDictionary olarak geçer; denendi).
 _FORCE_KEYFRAME = {VT.kVTEncodeFrameOptionKey_ForceKeyFrame: True}
 _MICROS = 1_000_000
 
@@ -86,14 +83,13 @@ class HevcEncoder:
     """
 
     def __init__(self, width: int, height: int, fps: int, bitrate: int,
-                 on_output: Callable[[bool, bytes | None, bytes], None]):
+                 on_output: Callable[[bool, int, bytes | None, bytes], None]):
         self.width, self.height, self.fps = width, height, fps
         self._on_output = on_output
-        self._index = 0
         status, self._session = VT.VTCompressionSessionCreate(None, width, height, CM.kCMVideoCodecType_HEVC,
                                                               None, None, None, None, None, None)
         if status != 0 or self._session is None:
-            raise OSError(f"VTCompressionSessionCreate başarısız: {status}")
+            raise OSError(f"VTCompressionSessionCreate failed: {status}")
         self._ptr = self._session.pointerAsInteger
         failed = {name: code for name, code in (
             ("RealTime", _set(self._ptr, VT.kVTCompressionPropertyKey_RealTime, True)),
@@ -103,7 +99,7 @@ class HevcEncoder:
             ("MaxKeyFrameInterval", _set(self._ptr, VT.kVTCompressionPropertyKey_MaxKeyFrameInterval, fps * 2)),
         ) if code != 0}
         if failed:
-            log.warning("kodlayıcı ayarları uygulanamadı: %s", failed)
+            log.warning("encoder properties not applied: %s", failed)
         self._handler = self._done
 
     def encode(self, image, pts_us: int, force_keyframe: bool = False) -> None:
@@ -111,13 +107,12 @@ class HevcEncoder:
         status, pixel_buffer = Quartz.CVPixelBufferCreate(None, self.width, self.height,
                                                           Quartz.kCVPixelFormatType_32BGRA, None, None)
         if status != 0:
-            log.warning("CVPixelBufferCreate başarısız: %s", status)
+            log.warning("CVPixelBufferCreate failed: %s", status)
             return
         ptr = objc.pyobjc_id(pixel_buffer)
         _cv.CVPixelBufferLockBaseAddress(ptr, 0)
         try:
             base, row = _cv.CVPixelBufferGetBaseAddress(ptr), _cv.CVPixelBufferGetBytesPerRow(ptr)
-            # Yazılabilir görünüm: from_buffer ara kopya yapmadan adresi verir.
             src = ctypes.addressof((ctypes.c_char * image.sizeInBytes()).from_buffer(image.bits()))
             line = image.bytesPerLine()
             if row == line:
@@ -130,7 +125,6 @@ class HevcEncoder:
             _cv.CVPixelBufferUnlockBaseAddress(ptr, 0)
         _encode(self._session, pixel_buffer, _make_time(pts_us, _MICROS), _make_time(_MICROS // self.fps, _MICROS),
                 _FORCE_KEYFRAME if force_keyframe else None, None, self._handler)
-        self._index += 1
 
     def close(self) -> None:
         if self._ptr:
@@ -139,7 +133,7 @@ class HevcEncoder:
         self._on_output = lambda *_: None
 
     def _done(self, status, _flags, sample) -> None:
-        # VideoToolbox iş parçacığı: istisna dışarı sızarsa tüm süreç düşer.
+        # İstisna VideoToolbox iş parçacığından sızarsa süreç düşer.
         try:
             if status != 0 or sample is None:
                 return
@@ -158,4 +152,4 @@ class HevcEncoder:
             if ok == 0:
                 self._on_output(keyframe, pts_us, hvcc, bytes(data))
         except Exception:
-            log.exception("kodlayıcı çıktısı işlenemedi")
+            log.exception("encoder output could not be processed")

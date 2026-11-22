@@ -1,9 +1,5 @@
-"""Boşta tam ekran ekran koruyucu (Faz 3a, yol A).
-
-Gerçek sistem entegrasyonu değildir: macOS kilitli oturumda uygulama pencerelerini gizler, bu yüzden
-Canard kendi boşluk sayacıyla, sistem ekran koruyucusundan ve kilitten önce devreye girer. Kilit,
-ekran uykusu ya da sistem ekran koruyucusu başlarsa hemen çekilir; kilit ekranını asla örtmez.
-"""
+"""Canard'ın kendi boşta tam ekranı (`--screensaver-after`): sistem ekran koruyucusu ve kilitten önce devreye girer;
+kilit, ekran uykusu ya da sistem ekran koruyucusu başlarsa hemen çekilir."""
 
 import logging
 import time
@@ -14,7 +10,6 @@ log = logging.getLogger("canard.screensaver")
 
 _IDLE_POLL_MS = 1000
 _ACTIVE_POLL_MS = 150
-# Kısayolla başlatınca tuşların bırakılması da giriş sayılır; ilk anlarda giriş yok sayılır.
 _GRACE_SECONDS = 1.5
 
 
@@ -35,7 +30,7 @@ class ScreensaverController(QObject):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(_IDLE_POLL_MS)
-        log.info("boşta %s sonra başlar (şimdi başlatmak için ⌃ + ⌥ + ⌘ + L)", _duration(after_seconds))
+        log.info("starts after %s idle (start now with ⌃ + ⌥ + ⌘ + L)", _duration(after_seconds))
 
     @property
     def active(self) -> bool:
@@ -43,13 +38,13 @@ class ScreensaverController(QObject):
 
     def start_now(self) -> None:
         if self._locked or self._asleep:
-            log.info("başlatılmadı: oturum kilitli ya da ekran uykuda")
+            log.info("not started: session locked or display asleep")
             return
-        self._activate("kısayol", grace=True)
+        self._activate("shortcut", grace=True)
 
     def close(self) -> None:
         self._timer.stop()
-        self._deactivate("kapanış")
+        self._deactivate("shutdown")
         self._watcher.close()
 
     def _tick(self) -> None:
@@ -58,7 +53,7 @@ class ScreensaverController(QObject):
             if time.monotonic() < self._grace_until:
                 self._last_idle = idle
             elif idle < self._last_idle:
-                self._deactivate("kullanıcı girişi")
+                self._deactivate("user input")
             else:
                 self._last_idle = idle
             return
@@ -70,23 +65,22 @@ class ScreensaverController(QObject):
         blockers = self._adapter.display_sleep_blockers()
         if blockers:
             if not self._blocked_reported:
-                log.info("ertelendi: ekranı uyanık tutan uygulama var (%s)", "; ".join(blockers))
+                log.info("postponed: an app keeps the display awake (%s)", "; ".join(blockers))
                 self._blocked_reported = True
             return
-        self._activate(f"{_duration(idle)} boşta")
+        self._activate(f"{_duration(idle)} idle")
 
     def _activate(self, reason: str, grace: bool = False) -> None:
         if self._active:
             return
         self._active = True
-        # Yalnız kısayolla başlatınca: tuşların bırakılması giriş sayılmasın. Boşlukla başlayınca ilk
-        # hareket bile hemen kapatmalı.
+        # Kısayolla başlatınca tuşların bırakılması giriş sayılmasın.
         self._grace_until = time.monotonic() + _GRACE_SECONDS if grace else 0.0
         self._last_idle = self._adapter.idle_seconds()
         self._manager.set_screensaver(True)
         self._focus.enter()
         self._timer.setInterval(_ACTIVE_POLL_MS)
-        log.info("başladı (%s)", reason)
+        log.info("started (%s)", reason)
 
     def _deactivate(self, reason: str) -> None:
         if not self._active:
@@ -95,23 +89,23 @@ class ScreensaverController(QObject):
         self._manager.set_screensaver(False)
         self._focus.leave()
         self._timer.setInterval(_IDLE_POLL_MS)
-        log.info("bitti (%s)", reason)
+        log.info("ended (%s)", reason)
 
     def _on_session(self, name: str) -> None:
-        log.debug("oturum olayı: %s", name)
+        log.debug("session event: %s", name)
         if name == "com.apple.screenIsLocked":
             self._locked = True
-            self._deactivate("oturum kilitlendi")
+            self._deactivate("session locked")
         elif name == "com.apple.screenIsUnlocked":
             self._locked = False
         elif name == "com.apple.screensaver.didstart":
-            self._deactivate("sistem ekran koruyucusu başladı")
+            self._deactivate("system screensaver started")
         elif name == "NSWorkspaceScreensDidSleepNotification":
             self._asleep = True
-            self._deactivate("ekran uyudu")
+            self._deactivate("display asleep")
         elif name == "NSWorkspaceScreensDidWakeNotification":
             self._asleep = False
 
 
 def _duration(seconds: float) -> str:
-    return f"{seconds / 60:.1f} dk" if seconds >= 60 else f"{seconds:.0f} sn"
+    return f"{seconds / 60:.1f} min" if seconds >= 60 else f"{seconds:.0f} s"

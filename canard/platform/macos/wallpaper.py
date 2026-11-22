@@ -27,8 +27,7 @@ def _ns_window(widget):
 
 def apply_wallpaper_behavior(widget, interactive: bool = False) -> None:
     window = _ns_window(widget)
-    # Pasif: simgelerin altında. Etkileşimli: Finder'ın simge penceresi boş masaüstü
-    # tıklamalarını yakaladığı için simgelerin üstüne çıkılır (simgeler bu sırada örtülür).
+    # Etkileşimli modda Finder'ın simge penceresi tıklamaları yakalamasın diye simgelerin üstüne çıkılır.
     offset = 1 if interactive else -1
     window.setLevel_(CGWindowLevelForKey(kCGDesktopIconWindowLevelKey) + offset)
     window.setHasShadow_(False)
@@ -48,7 +47,7 @@ def observe_occlusion(widget, callback):
     def on_change(_notification):
         visible = bool(window.occlusionState() & NSWindowOcclusionStateVisible)
         if not visible:
-            log.debug("örtülü bildirimi, üstteki pencereler: %s", _covering_windows(window))
+            log.debug("occluded notification, windows above: %s", _covering_windows(window))
         callback(visible)
 
     token = NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
@@ -58,8 +57,7 @@ def observe_occlusion(widget, callback):
 
 
 def _covering_windows(window, limit: int = 10) -> str:
-    """Tanı: macOS duvar kağıdını "örtülü" dediğinde üstünde ekranı kaplayan pencereler (sahip, katman, ekranın yüzde
-    kaçı, saydamlık). Yanlış "örtülü" bildirimlerinin kaynağını bulmak için (2026-11-22: IntelliJ öne gelince donma)."""
+    """Tanı: "örtülü" bildiriminde pencerenin ≥%25'ini kaplayan üstteki pencereler."""
     try:
         frame = window.frame()
         main_height = NSScreen.screens()[0].frame().size.height  # Cocoa sol-alt → CG sol-üst
@@ -75,17 +73,15 @@ def _covering_windows(window, limit: int = 10) -> str:
             if overlap / area >= 0.25:
                 name = info.get("kCGWindowName") or ""
                 found.append(f"{info.get('kCGWindowOwnerName', '?')}{f' «{name[:30]}»' if name else ''}"
-                             f" katman={info.get('kCGWindowLayer')} %{100 * overlap / area:.0f}"
-                             f" alfa={info.get('kCGWindowAlpha', 1):.2g}")
-        return "; ".join(found[:limit]) + (f" (+{len(found) - limit})" if len(found) > limit else "") or "yok"
+                             f" layer={info.get('kCGWindowLayer')} %{100 * overlap / area:.0f}"
+                             f" alpha={info.get('kCGWindowAlpha', 1):.2g}")
+        return "; ".join(found[:limit]) + (f" (+{len(found) - limit})" if len(found) > limit else "") or "none"
     except Exception as error:  # tanı satırı uygulamayı asla düşürmesin
-        return f"okunamadı: {error!r}"
+        return f"unreadable: {error!r}"
 
 
 def reorder_window(widget) -> None:
-    """Pencereyi yalnız AppKit düzeyinde kapatıp aynı anda yeniden öne alır: WindowServer pencerenin güncel içeriğini
-    yeniden bağlar. Qt'ye gizle/göster gitmediği için sayfa görünürlüğü değişmez ve arada sistem duvar kağıdı
-    görünmez (Qt hide/show kısa bir titreme veriyordu)."""
+    """AppKit düzeyinde kapatıp yeniden öne alır: WindowServer güncel içeriği bağlar, Qt görünürlüğü değişmez."""
     window = _ns_window(widget)
     window.orderOut_(None)
     window.orderFrontRegardless()
@@ -96,8 +92,7 @@ def is_visible(widget) -> bool:
 
 
 def display_id_for(screen) -> int | None:
-    """QScreen → CGDirectDisplayID (Canard.saver ekranını bununla bildirir). Qt ekran adı NSScreen.localizedName'dir;
-    aynı adlı ekranlarda konum (Qt sol-üst, Cocoa sol-alt) ile ayırt edilir."""
+    """QScreen → CGDirectDisplayID. Qt ekran adı NSScreen.localizedName; aynı adlılar konumla ayırt edilir."""
     geometry = screen.geometry()
     matches = [s for s in NSScreen.screens() if s.localizedName() == screen.name()]
     if len(matches) > 1:

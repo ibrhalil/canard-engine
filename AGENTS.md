@@ -6,6 +6,7 @@ Canard hosts web content — remote URL, local build, dev server, or bundled pac
 - `docs/PROMPT.md` — full requirements, verbatim from the owner. The contract for scope, platforms, and phases.
 - `PLAN.md` — the single decision ledger and project memory. Keep it current; it is the exchange format with the owner's external tracker (Noma).
 - `README.md` — human-facing overview, root only; no README in subdirectories.
+- `docs/USAGE.md`, `docs/PERMISSIONS.md`, `docs/ARCHITECTURE.md` — user and developer docs, in English; keep them short and current.
 
 ## Working rules
 - Start with Phase 0 research (PROMPT.md §9): inspect mscillus, verify every technical assumption against current official documentation, and produce the seven outputs (architecture, technology justification, platform compatibility matrix, folder layout, development stages, test strategy, known risks). Feature code comes only after user approval of that report.

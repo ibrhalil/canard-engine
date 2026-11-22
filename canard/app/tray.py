@@ -1,20 +1,23 @@
-"""Menü çubuğu (`canard --tray`): duvar kağıdı, kaynak, başlangıç betiği, sistem sesi, ekran koruyucu, oturum açılışı.
+"""Menü çubuğu (`canard --tray`). Seçimler settings.json'da (`tray.*`, `saver.*`); hatalar iletişim kutusuyla gösterilir
+(tepsi bildirimleri macOS'ta uygulama paketine bağlı)."""
 
-Seçimler settings.json'da kalır (`tray.*`, `saver.*`); kaynaklar ve başlangıç betiği zaten kaynak kaydında.
-Hatalar iletişim kutusuyla gösterilir: tepsi bildirimleri (showMessage) macOS'ta uygulama paketine bağlı.
-"""
-
+import html
 import logging
+import platform
 from pathlib import Path
 
-from PySide6.QtCore import QKeyCombination, QObject, QPointF, QRectF, Qt, QUrl
+from PySide6.QtCore import QKeyCombination, QObject, QPointF, QRectF, Qt, QUrl, qVersion
 from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMenu, QMessageBox, QSystemTrayIcon
 
 import canard
 from canard.app import logs
+from canard import i18n
+from canard.app.application import LANGUAGE_KEY
 from canard.content.sources import BUILD, DEVSERVER, REMOTE, SourceError, from_build, from_url, validate
+from canard.i18n import N_, t
 from canard.platform.base import detect
+from canard.web.engine import web_data_location
 
 log = logging.getLogger("canard.tray")
 
@@ -27,13 +30,16 @@ _DEFAULTS = {
     "tray.disabled_screens": [],
 }
 _FPS_CHOICES = (24, 30)
-_TYPE_LABELS = {BUILD: "yerel build", REMOTE: "uzak", DEVSERVER: "dev sunucu"}
+_TYPE_LABELS = {BUILD: N_("local build"), REMOTE: N_("remote"), DEVSERVER: N_("dev server")}
 _TOOLS = Path(canard.__file__).resolve().parents[1] / "tools"
-_PRESET_LABELS = {"mscillus-boot-system.js": "mscillus: sistem sesi", "mscillus-boot-mic.js": "mscillus: mikrofon"}
+_PRESET_LABELS = {"mscillus-boot-system.js": N_("mscillus: system audio"),
+                  "mscillus-boot-mic.js": N_("mscillus: microphone")}
 _ARROWS = {"←": Qt.Key.Key_Left, "→": Qt.Key.Key_Right}
-_PERMISSIONS = {"system_audio": "Sistem sesi kaydı", "microphone": "Mikrofon"}
-_PERMISSION_STATES = {"granted": "izin verildi ✓", "denied": "kapalı ⚠︎", "unknown": "henüz sorulmadı",
-                      None: "bilinmiyor"}
+_PERMISSIONS = {"system_audio": N_("System Audio Recording"), "microphone": N_("Microphone")}
+_PERMISSION_STATES = {"granted": N_("allowed ✓"), "denied": N_("off ⚠︎"), "unknown": N_("not asked yet"),
+                      None: N_("unknown")}
+_REPO_URL = "https://github.com/ibrhalil/canard-engine"
+_PRIVACY_URL = f"{_REPO_URL}/blob/main/docs/PERMISSIONS.md"
 
 
 def runtime_options(store) -> dict:
@@ -58,7 +64,7 @@ def _boot_presets() -> list[tuple[str, str]]:
     for path in sorted(_TOOLS.glob("*-boot-*.js"), key=lambda p: (known.index(p.name) if p.name in known
                                                                   else len(known), p.name)):
         try:
-            presets.append((_PRESET_LABELS.get(path.name, path.stem), path.read_text(encoding="utf-8")))
+            presets.append((t(_PRESET_LABELS.get(path.name, path.stem)), path.read_text(encoding="utf-8")))
         except OSError:
             continue
     return presets
@@ -86,19 +92,30 @@ def _icon() -> QIcon:
 
 
 def _clear(menu: QMenu) -> None:
-    # QMenu.clear() eylemleri hemen siler; menüyü yeniden kuran çağrı o menünün bir eyleminin sinyalinden
-    # (ya da onun açtığı iletişim kutusundan) gelebilir → silme olay döngüsüne bırakılır.
+    # QMenu.clear() hemen siler; çağrı o menünün kendi eyleminden gelebileceği için silme ertelenir.
     for action in menu.actions():
         menu.removeAction(action)
         action.deleteLater()
 
 
+def _type_label(kind: str) -> str:
+    return t(_TYPE_LABELS[kind]) if kind in _TYPE_LABELS else kind
+
+
+def _folder_link(path: Path) -> str:
+    """Finder'da açılan klasör bağlantısı; dosya verilirse içinde bulunduğu klasör açılır, ev dizini ~ ile kısaltılır."""
+    folder = path if path.is_dir() else path.parent
+    home = str(Path.home())
+    shown = "~" + str(path)[len(home):] if str(path).startswith(home) else str(path)
+    href = bytes(QUrl.fromLocalFile(str(folder)).toEncoded()).decode()
+    return f'<a href="{html.escape(href)}">{html.escape(shown)}</a>'
+
+
 class TrayMenu(QObject):
     def __init__(self, app, runtime):
         super().__init__(runtime)
-        self._app = app  # CanardApp: kaynak kaydı ve ayarlar
+        self._app = app  # CanardApp
         self._runtime = runtime
-        runtime.saver_off_hint = "Canard menüsü › Ekran koruyucu › Canard.saver'a yayın"
         adapter = detect()
         try:
             self._platform = adapter.app_integration()
@@ -108,60 +125,11 @@ class TrayMenu(QObject):
             self._keys = adapter.hotkey_keys()
         except NotImplementedError:
             self._keys = {}
-
-        menu = self._menu = QMenu()
-        self._status = menu.addAction("")
-        self._status.setEnabled(False)
-        menu.addSeparator()
-        # İçerik
-        self._wallpaper = self._shortcut(self._check(menu, "Duvar kağıdı", runtime.set_wallpaper), "toggle_wallpaper")
-        self._pause = self._shortcut(self._check(menu, "Duraklat", runtime.set_paused), "toggle_pause")
-        self._reload = self._shortcut(menu.addAction("Sayfayı yeniden yükle", runtime.reload), "reload")
-        self._interactive = self._shortcut(self._check(menu, "Etkileşimli mod", runtime.set_interactive),
-                                           "toggle_interactive")
-        self._screens = menu.addMenu("Ekranlar")
-        self._sources = menu.addMenu("Kaynak")
-        self._boot = menu.addMenu("Başlangıç betiği")
-        self._audio = self._check(menu, "Sistem sesi", runtime.set_system_audio)
-        permissions = menu.addMenu("İzinler")
-        self._permission_rows = {}
-        for kind, title in _PERMISSIONS.items():
-            self._permission_rows[kind] = permissions.addAction(title)
-            self._permission_rows[kind].setEnabled(False)
-        permissions.addSeparator()
-        for kind, title in _PERMISSIONS.items():
-            permissions.addAction(f"{title} izin ayarlarını aç…", lambda k=kind: self._open_privacy(k))
         self._permissions_shown: set[str] = set()
-        menu.addSeparator()
-        # Ekran koruyucu
-        self._start_saver = self._shortcut(menu.addAction("Ekran koruyucuyu başlat", runtime.start_screensaver),
-                                           "screensaver_now")
-        saver = menu.addMenu("Ekran koruyucu")
-        self._saver_state = saver.addAction("")
-        self._saver_state.setEnabled(False)
-        self._lock_state = saver.addAction("")
-        self._lock_state.setEnabled(False)
-        self._saver_install = saver.addAction("Kur…", self._install_saver)
-        saver.addAction("Ekran koruyucu ayarları…", self._open_screensaver_settings)
-        saver.addAction("Kilit ekranı ayarları…", self._open_lock_screen_settings)
-        saver.addSeparator()
-        self._saver_stream = self._check(saver, "Canard.saver'a yayın", runtime.set_saver_stream)
-        fps_menu = saver.addMenu("Kare hızı")
-        self._fps = {}
-        for fps in _FPS_CHOICES:
-            self._fps[fps] = self._check(fps_menu, f"{fps} kare/sn", lambda _checked, f=fps: runtime.set_saver_fps(f))
-        menu.addSeparator()
-        # Uygulama
-        self._login = self._check(menu, "Oturum açılışında başlat", self._set_login_item)
-        menu.addAction("Log klasörünü aç", self._open_logs)
-        menu.addAction("Hakkında", self._about)
-        menu.addSeparator()
-        menu.addAction("Çık", QApplication.quit)
-        menu.aboutToShow.connect(self._refresh_system)
-
+        self._menu = None
         self._tray = QSystemTrayIcon(_icon(), self)
         self._tray.setToolTip("Canard")
-        self._tray.setContextMenu(menu)
+        self._build_menu()
         runtime.changed.connect(self._on_changed)
         runtime.error.connect(self.show_error)
         runtime.permission_needed.connect(self._explain_permission)
@@ -171,7 +139,63 @@ class TrayMenu(QObject):
         self._refresh()
         self._tray.show()
         if not QSystemTrayIcon.isSystemTrayAvailable():
-            log.error("menü çubuğu simgesi gösterilemiyor (sistem tepsisi yok)")
+            log.error("menu bar icon cannot be shown (no system tray)")
+
+    def _build_menu(self) -> None:
+        """Menüyü seçili dilde kurar; dil değişince baştan kurulur."""
+        runtime = self._runtime
+        runtime.saver_off_hint = t("Canard menu › Screensaver › Stream to Canard.saver")
+        old, menu = self._menu, QMenu()
+        self._menu = menu
+        self._status = menu.addAction("")
+        self._status.setEnabled(False)
+        menu.addSeparator()
+        self._wallpaper = self._shortcut(self._check(menu, t("Wallpaper"), runtime.set_wallpaper), "toggle_wallpaper")
+        self._pause = self._shortcut(self._check(menu, t("Pause"), runtime.set_paused), "toggle_pause")
+        self._reload = self._shortcut(menu.addAction(t("Reload Page"), runtime.reload), "reload")
+        self._interactive = self._shortcut(self._check(menu, t("Interactive Mode"), runtime.set_interactive),
+                                           "toggle_interactive")
+        self._screens = menu.addMenu(t("Screens"))
+        self._sources = menu.addMenu(t("Source"))
+        self._boot = menu.addMenu(t("Boot Script"))
+        self._audio = self._check(menu, t("System Audio"), runtime.set_system_audio)
+        permissions = menu.addMenu(t("Permissions"))
+        self._permission_rows = {}
+        for kind in _PERMISSIONS:
+            self._permission_rows[kind] = permissions.addAction("")
+            self._permission_rows[kind].setEnabled(False)
+        permissions.addSeparator()
+        for kind, title in _PERMISSIONS.items():
+            permissions.addAction(t("Open {permission} Settings…", permission=t(title)),
+                                  lambda k=kind: self._open_privacy(k))
+        menu.addSeparator()
+        self._start_saver = self._shortcut(menu.addAction("", runtime.start_screensaver), "screensaver_now")
+        saver = menu.addMenu(t("Screensaver"))
+        self._saver_state = saver.addAction("")
+        self._saver_state.setEnabled(False)
+        self._lock_state = saver.addAction("")
+        self._lock_state.setEnabled(False)
+        self._saver_install = saver.addAction("", self._install_saver)
+        saver.addAction(t("Screensaver Settings…"), self._open_screensaver_settings)
+        saver.addAction(t("Lock Screen Settings…"), self._open_lock_screen_settings)
+        saver.addSeparator()
+        self._saver_stream = self._check(saver, t("Stream to Canard.saver"), runtime.set_saver_stream)
+        fps_menu = saver.addMenu(t("Frame Rate"))
+        self._fps = {}
+        for fps in _FPS_CHOICES:
+            self._fps[fps] = self._check(fps_menu, t("{fps} fps", fps=fps),
+                                         lambda _checked, f=fps: runtime.set_saver_fps(f))
+        menu.addSeparator()
+        self._login = self._check(menu, t("Open at Login"), self._set_login_item)
+        self._languages = menu.addMenu(t("Language"))
+        menu.addAction(t("Open Log Folder"), self._open_logs)
+        menu.addAction(t("About Canard"), self._about)
+        menu.addSeparator()
+        menu.addAction(t("Quit Canard"), QApplication.quit)
+        menu.aboutToShow.connect(self._refresh_system)
+        self._tray.setContextMenu(menu)
+        if old is not None:
+            old.deleteLater()
 
     def close(self) -> None:
         self._tray.hide()
@@ -181,12 +205,8 @@ class TrayMenu(QObject):
         self._front()
         QMessageBox.warning(None, "Canard", message)
 
-    # Durum
-
     def _shortcut(self, action, name: str):
-        """Global kısayolu öğenin yanında, macOS'un sağa dayalı kısayol sütununda gösterir. Tuşa basınca eylemi global
-        kısayol (Carbon) çalıştırır; kayıtlı kısayolu sistem yakaladığı için menü onu ikinci kez tetiklemez. Qt kısayolu
-        yalnız bu öğeye bağlı kalsın diye en dar bağlam seçilir."""
+        """Global kısayolu öğenin yanında gösterir; tuşu Carbon kısayolu yakalar, menü ikinci kez tetiklemez."""
         key = self._keys.get(name)
         if key:
             # macOS'ta Qt: Meta = ⌃, Alt = ⌥, Ctrl = ⌘.
@@ -195,8 +215,7 @@ class TrayMenu(QObject):
                          | Qt.KeyboardModifier.ControlModifier)
             action.setShortcut(QKeySequence(QKeyCombination(modifiers, code)))
             action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
-            # Menü çubuğu menüsü Qt'de "context menu" sayılır ve macOS'ta Qt orada kısayolları varsayılan olarak gizler
-            # (AA_DontShowShortcutsInContextMenus = True); öğe başına açıkça gösterilir.
+            # Qt menü çubuğu menüsünü "context menu" sayar ve orada kısayolları gizler.
             action.setShortcutVisibleInContextMenu(True)
         return action
 
@@ -210,7 +229,7 @@ class TrayMenu(QObject):
         try:
             handler(*args)
         finally:
-            self._refresh()  # reddedilen değişiklikte (ör. duvar kağıdı kapalıyken etkileşimli) işaret geri alınır
+            self._refresh()  # reddedilen değişiklikte işaret geri alınır
 
     def _on_changed(self) -> None:
         runtime = self._runtime
@@ -227,13 +246,13 @@ class TrayMenu(QObject):
     def _refresh(self) -> None:
         runtime = self._runtime
         source = runtime.source
-        parts = ["duvar kağıdı açık" if runtime.wallpaper else "duvar kağıdı kapalı",
-                 f"{source.name} ({_TYPE_LABELS.get(source.type, source.type)})" if source else "kaynak yok",
-                 "yayın açık" if runtime.saver_stream else "yayın kapalı"]
+        parts = [t("wallpaper on") if runtime.wallpaper else t("wallpaper off"),
+                 f"{source.name} ({_type_label(source.type)})" if source else t("no source"),
+                 t("stream on") if runtime.saver_stream else t("stream off")]
         if runtime.paused:
-            parts.insert(1, "⏸ duraklatıldı")
+            parts.insert(1, t("⏸ paused"))
         if self._permission_problem():
-            parts.append("⚠︎ izin gerekli")
+            parts.append(t("⚠︎ permission needed"))
         self._status.setText("Canard — " + " · ".join(parts))
         self._wallpaper.setChecked(runtime.wallpaper)
         self._pause.setChecked(runtime.paused)
@@ -248,44 +267,49 @@ class TrayMenu(QObject):
         self._rebuild_screens()
         self._rebuild_sources()
         self._rebuild_boot()
+        self._rebuild_languages()
         self._refresh_system()
 
     def _refresh_system(self) -> None:
-        # Menü dışında değişebilenler (Canard.saver kurulumu, giriş öğesi) her açılışta yeniden okunur.
+        # Menü dışında değişebilenler her açılışta yeniden okunur.
         platform = self._platform
         installed = platform is not None and platform.saver_installed()
-        self._saver_state.setText("Canard.saver kurulu ✓" if installed else "Canard.saver kurulu değil")
-        self._saver_install.setText("Yeniden kur…" if installed else "Kur…")
+        self._saver_state.setText(t("Canard.saver installed ✓") if installed else t("Canard.saver not installed"))
+        self._saver_install.setText(t("Reinstall…") if installed else t("Install…"))
         self._saver_install.setEnabled(platform is not None and platform.saver_package() is not None)
-        # Kilit ekranının üstünde yalnız ekran koruyucu çalışır; parola "hemen" değilse başlatmak oturumu kilitlemez.
+        # Parola "hemen" değilse ekran koruyucuyu başlatmak oturumu kilitlemez.
         delay = platform.screen_lock_delay() if platform is not None else None
         if delay == 0:
-            self._lock_state.setText("Parola: ekran koruyucu başlayınca hemen ✓")
-            self._start_saver.setText("Ekran koruyucuyu başlat ve kilitle")
+            self._lock_state.setText(t("Password: immediately after the screensaver starts ✓"))
+            self._start_saver.setText(t("Start Screensaver and Lock"))
         else:
-            when = f"{delay} sn sonra" if delay else "istenmiyor"
-            self._lock_state.setText(f"⚠︎ Parola {when} — kilit için Kilit ekranı ayarları")
-            self._start_saver.setText("Ekran koruyucuyu başlat")
+            when = t("after {seconds} s", seconds=delay) if delay else t("not required")
+            self._lock_state.setText(t("⚠︎ Password {when} — to lock, see Lock Screen Settings", when=when))
+            self._start_saver.setText(t("Start Screensaver"))
         self._start_saver.setEnabled(platform is not None and self._runtime.running)
         for kind, title in _PERMISSIONS.items():
-            self._permission_rows[kind].setText(f"{title}: {_PERMISSION_STATES[self._runtime.permission_status(kind)]}")
-        if self._permission_problem() and "⚠︎ izin gerekli" not in self._status.text():
-            self._status.setText(self._status.text() + " · ⚠︎ izin gerekli")
+            state = _PERMISSION_STATES[self._runtime.permission_status(kind)]
+            self._permission_rows[kind].setText(f"{t(title)}: {t(state)}")
+        problem = t("⚠︎ permission needed")
+        if self._permission_problem() and problem not in self._status.text():
+            self._status.setText(f"{self._status.text()} · {problem}")
         login = platform is not None and platform.login_item_enabled()
         self._login.setChecked(login)
         self._login.setEnabled(login or (platform is not None and platform.app_bundle() is not None))
 
     def _rebuild_screens(self) -> None:
-        # Bağlı ekranlar; kapatılıp şu an bağlı olmayanlar da listede kalır ki yeniden açılabilsin.
+        # Kapatılıp şu an bağlı olmayan ekranlar da listede kalır ki yeniden açılabilsin.
         menu = self._screens
         _clear(menu)
         disabled = self._runtime.disabled_screens
         connected = [screen.name() for screen in QApplication.instance().screens()]
         primary = QApplication.instance().primaryScreen()
         for index, name in enumerate(connected + sorted(disabled - set(connected))):
-            label = (name or f"Ekran {index + 1}") + ("  (ana ekran)" if primary is not None and name == primary.name() else "")
+            label = name or t("Screen {number}", number=index + 1)
+            if primary is not None and name == primary.name():
+                label += "  " + t("(main)")
             if name not in connected:
-                label += "  (bağlı değil)"
+                label += "  " + t("(not connected)")
             action = menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(name not in disabled)
@@ -298,19 +322,19 @@ class TrayMenu(QObject):
         active = self._runtime.source
         sources = self._app.registry.list()
         for source in sources:
-            action = menu.addAction(f"{source.name} ({_TYPE_LABELS.get(source.type, source.type)})")
+            action = menu.addAction(f"{source.name} ({_type_label(source.type)})")
             action.setCheckable(True)
             action.setChecked(active is not None and source.id == active.id)
             action.setToolTip(source.url or source.path or "")
             action.triggered.connect(lambda _checked, s=source: self._run(self._open_source, s))
         if sources:
             menu.addSeparator()
-        menu.addAction("URL ekle…", self._add_url)
-        menu.addAction("Klasör ekle…", self._add_folder)
+        menu.addAction(t("Add URL…"), self._add_url)
+        menu.addAction(t("Add Folder…"), self._add_folder)
         if sources:
-            self._shortcut(menu.addAction("Sonraki kaynak", self._runtime.next_source), "next_source").setEnabled(
+            self._shortcut(menu.addAction(t("Next Source"), self._runtime.next_source), "next_source").setEnabled(
                 len(sources) > 1)
-            remove = menu.addMenu("Kaynağı kaldır")
+            remove = menu.addMenu(t("Remove Source"))
             for source in sources:
                 remove.addAction(source.name).triggered.connect(
                     lambda _checked, s=source: self._run(self._remove_source, s))
@@ -319,23 +343,21 @@ class TrayMenu(QObject):
         menu = self._boot
         _clear(menu)
         source = self._runtime.source
-        menu.menuAction().setEnabled(source is not None)  # Qt yerel menüde alt menüyü açan öğe kapatılır
+        menu.menuAction().setEnabled(source is not None)
         current = source.boot_script if source else None
-        options = [("Yok", None), *_boot_presets()]
+        options = [(t("None"), None), *_boot_presets()]
         for label, text in options:
             action = menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(current == text)
             action.triggered.connect(lambda _checked, t=text: self._run(self._set_boot_script, t))
         if current and all(current != text for _label, text in options):
-            custom = menu.addAction("Dosyadan seçilen betik")
+            custom = menu.addAction(t("Script from file"))
             custom.setCheckable(True)
             custom.setChecked(True)
             custom.setEnabled(False)
         menu.addSeparator()
-        menu.addAction("Dosya seç…", self._choose_boot_file)
-
-    # Eylemler
+        menu.addAction(t("Choose File…"), self._choose_boot_file)
 
     def _open_source(self, source) -> None:
         if self._runtime.source is not None and self._runtime.source.id == source.id:
@@ -343,7 +365,7 @@ class TrayMenu(QObject):
         try:
             self._runtime.set_source(source)
         except SourceError as error:
-            self.show_error(f"Kaynak açılamadı: {error}")
+            self.show_error(t("Could not open source: {error}", error=error))
 
     def _add_source(self, source, existing) -> None:
         if existing is None:
@@ -352,19 +374,19 @@ class TrayMenu(QObject):
                 self.show_error("\n".join(errors))
                 return
             existing = self._app.registry.add(source)
-            log.info("kaynak eklendi: %s (%s)", existing.id, existing.name)
+            log.info("source added: %s (%s)", existing.id, existing.name)
         self._run(self._open_source, existing)
 
     def _add_url(self) -> None:
         self._front()
-        url, ok = QInputDialog.getText(None, "Canard — URL ekle", "Uzak site ya da dev sunucusu adresi (http/https):")
+        url, ok = QInputDialog.getText(None, t("Canard — Add URL"), t("Remote site or dev server address (http/https):"))
         url = url.strip()
         if ok and url:
             self._add_source(from_url(url), self._app.registry.find(url=url))
 
     def _add_folder(self) -> None:
         self._front()
-        path = QFileDialog.getExistingDirectory(None, "Canard — build klasörü seç (index.html içeren)",
+        path = QFileDialog.getExistingDirectory(None, t("Canard — Choose a build folder (containing index.html)"),
                                                 str(Path.home()))
         if path:
             source = from_build(path)
@@ -373,21 +395,22 @@ class TrayMenu(QObject):
     def _remove_source(self, source) -> None:
         self._front()
         answer = QMessageBox.question(
-            None, "Canard — kaynağı kaldır",
-            f"\"{source.name}\" kaynağı listeden kaldırılsın mı?\n{source.url or source.path}\n\n"
-            "İçeriğin yerel verileri (localStorage, çerezler) silinmez.")
+            None, t("Canard — Remove Source"),
+            t("Remove \"{name}\" from the list?\n{location}\n\n"
+              "The content's local data (localStorage, cookies) is not deleted.",
+              name=source.name, location=source.url or source.path))
         if answer != QMessageBox.StandardButton.Yes:
             return
         active = self._runtime.source
         if active is not None and active.id == source.id:
             if len(self._app.registry.list()) < 2:
-                self.show_error("Gösterilen tek kaynak kaldırılamaz; önce başka bir kaynak ekle.")
+                self.show_error(t("The only source cannot be removed; add another source first."))
                 return
-            self._runtime.next_source()  # önce başka kaynağa geçilir
+            self._runtime.next_source()
             if self._runtime.source is None or self._runtime.source.id == source.id:
-                return  # geçilemedi (hata zaten gösterildi)
+                return  # geçilemedi, hata gösterildi
         self._app.registry.remove(source.id)
-        log.info("kaynak kaldırıldı: %s (%s)", source.id, source.name)
+        log.info("source removed: %s (%s)", source.id, source.name)
 
     def _set_boot_script(self, text: str | None) -> None:
         source = self._runtime.source
@@ -397,14 +420,14 @@ class TrayMenu(QObject):
     def _choose_boot_file(self) -> None:
         self._front()
         start = _TOOLS if _TOOLS.is_dir() else Path.home()
-        path, _filter = QFileDialog.getOpenFileName(None, "Canard — başlangıç betiği seç", str(start),
+        path, _filter = QFileDialog.getOpenFileName(None, t("Canard — Choose a boot script"), str(start),
                                                     "JavaScript (*.js)")
         if not path:
             return
         try:
             text = Path(path).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as error:
-            self.show_error(f"Betik okunamadı: {error}")
+            self.show_error(t("Could not read the script: {error}", error=error))
             return
         self._run(self._set_boot_script, text)
 
@@ -412,24 +435,24 @@ class TrayMenu(QObject):
         try:
             self._platform.set_login_item(enabled)
         except OSError as error:
-            self.show_error(f"Oturum açılışı ayarlanamadı: {error}")
+            self.show_error(t("Could not change Open at Login: {error}", error=error))
         else:
-            log.info("oturum açılışında başlatma %s", "açık" if enabled else "kapalı")
+            log.info("open at login %s", "on" if enabled else "off")
 
     def _install_saver(self) -> None:
         try:
             self._platform.install_saver()
         except Exception as error:
-            self.show_error(f"Canard.saver kurulamadı: {error}")
+            self.show_error(t("Could not install Canard.saver: {error}", error=error))
         else:
-            log.info("Canard.saver kuruldu (ekran koruyucu süreci yeniden başlatıldı)")
+            log.info("Canard.saver installed (screensaver process restarted)")
 
     def _open_screensaver_settings(self) -> None:
         if self._platform is not None:
             self._platform.open_screensaver_settings()
 
     def _permission_problem(self) -> bool:
-        # Yalnız kullanılan izinler: sistem sesi köprüsü açıksa sistem sesi, sayfa mikrofon istediyse mikrofon.
+        # Yalnız kullanılan izinler sayılır.
         runtime = self._runtime
         return ((runtime.system_audio and runtime.permission_status("system_audio") == "denied")
                 or (runtime.mic_requested and runtime.permission_status("microphone") == "denied"))
@@ -441,18 +464,19 @@ class TrayMenu(QObject):
             return
         self._permissions_shown.add(kind)
         if kind == "system_audio":
-            title = "Canard sistem sesini duyamıyor"
-            text = ("macOS'ta Canard için \"Ekran ve Sistem Sesi Kaydı\" izni kapalı; görselleştirici çalan müziğe "
-                    "tepki vermez.\n\nSistem Ayarları › Gizlilik ve Güvenlik › Ekran ve Sistem Sesi Kaydı'nda "
-                    "\"Yalnızca Sistem Sesi Kaydı\" altında Canard'ı aç. Değişiklik Canard yeniden açılınca geçerli olur.")
+            title = t("Canard can't hear system audio")
+            text = t("The \"Screen & System Audio Recording\" permission is off for Canard, so the visualizer won't "
+                     "react to music.\n\nTurn on Canard in System Settings › Privacy & Security › Screen & System "
+                     "Audio Recording, under \"System Audio Recording Only\". The change applies after Canard restarts.")
         else:
-            title = "Canard mikrofonu kullanamıyor"
-            text = ("İçerik mikrofon istedi ama macOS'ta Canard için mikrofon izni kapalı.\n\nSistem Ayarları › "
-                    "Gizlilik ve Güvenlik › Mikrofon'da Canard'ı aç. Değişiklik Canard yeniden açılınca geçerli olur.")
+            title = t("Canard can't use the microphone")
+            text = t("The content asked for the microphone, but the microphone permission is off for Canard.\n\n"
+                     "Turn on Canard in System Settings › Privacy & Security › Microphone. The change applies after "
+                     "Canard restarts.")
         self._front()
         box = QMessageBox(QMessageBox.Icon.Warning, title, text)
-        settings = box.addButton("Ayarları Aç", QMessageBox.ButtonRole.AcceptRole)
-        box.addButton("Sonra", QMessageBox.ButtonRole.RejectRole)
+        settings = box.addButton(t("Open Settings"), QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(t("Later"), QMessageBox.ButtonRole.RejectRole)
         box.exec()
         if box.clickedButton() is settings:
             self._open_privacy(kind)
@@ -470,17 +494,64 @@ class TrayMenu(QObject):
         if folder.is_dir():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
         else:
-            self.show_error(f"Log klasörü henüz yok: {folder}")
+            self.show_error(t("The log folder doesn't exist yet: {path}", path=folder))
 
     def _about(self) -> None:
         self._front()
-        QMessageBox.about(None, "Canard hakkında", (
-            f"<b>Canard {canard.__version__}</b> — CANvas boARD engine<br>"
-            "Web içeriklerini canlı duvar kağıdı ve ekran koruyucusu olarak çalıştırır.<br>"
-            "Lisans: GPL-3.0<br><br>"
-            f"Ayarlar: {self._app.settings_path}<br>"
-            f"Log: {logs.default_log_path()}"))
+        try:
+            from PySide6.QtWebEngineCore import qWebEngineChromiumVersion
+
+            chromium = f" · Chromium {qWebEngineChromiumVersion()}"
+        except ImportError:
+            chromium = ""
+        folders = (
+            (t("Settings"), "", Path(self._app.settings_path)),
+            (t("Content data"), " " + t("(localStorage, IndexedDB, cookies)"), web_data_location()),
+            (t("Logs"), "", logs.default_log_path().parent),
+        )
+        rows = "".join(f"<b>{title}</b>{detail}<br>{_folder_link(path)}<br>" for title, detail, path in folders)
+        box = QMessageBox()
+        box.setWindowTitle(t("About Canard"))
+        box.setIconPixmap(QApplication.windowIcon().pixmap(64, 64))
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        box.setText(f"<b>Canard {canard.__version__}</b>")
+        box.setInformativeText(
+            t("Runs web content as a live wallpaper and screensaver.") + "<br><br>"
+            f'<a href="{_REPO_URL}">{_REPO_URL.removeprefix("https://")}</a> · {t("License")}: GNU GPL v3<br>'
+            f"<small>Python {platform.python_version()} · Qt {qVersion()}{chromium}</small><br><br>"
+            + t("Canard collects no data; everything stays on this computer.")
+            + f' <a href="{_PRIVACY_URL}">{t("Details")}</a><br><br>'
+            f"{rows}<br><small>"
+            + t("All sources share one web profile; data is kept separate per site address (origin). "
+                "Removing a source from the list does not delete its data.")
+            + "</small>")
+        box.exec()
+
+    def _rebuild_languages(self) -> None:
+        menu = self._languages
+        _clear(menu)
+        choice = self._app.store.get(LANGUAGE_KEY, i18n.SYSTEM)
+        options = [(i18n.SYSTEM, t("System Default")), *i18n.LANGUAGES.items()]
+        for code, label in options:
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(code == choice or (code == i18n.SYSTEM and choice not in i18n.LANGUAGES))
+            action.triggered.connect(lambda _checked, c=code: self._run(self._set_language, c))
+
+    def _set_language(self, choice: str) -> None:
+        store = self._app.store
+        store.set(LANGUAGE_KEY, choice)
+        store.save()
+        code = i18n.resolve(choice)
+        log.info("language: %s (%s)", code, choice)
+        if code == i18n.language:
+            return
+        i18n.set_language(code)
+        self._app.apply_qt_language()
+        self._build_menu()
 
     def _front(self) -> None:
         if self._platform is not None:
             self._platform.bring_to_front()
+

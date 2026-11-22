@@ -1,14 +1,8 @@
-"""Ekran koruyucu kare yayını: Canard.saver'a ekran başına donanım HEVC akışı (Faz 3a, yol B).
+"""Ekran koruyucu kare yayını: Canard.saver'a ekran başına donanım HEVC akışı.
 
-macOS kilitli oturumda uygulama pencerelerini gizler; gerçek ekran koruyucu (Canard.saver) içeriği kendisi
-çizemez (legacyScreenSaver'da WKWebView animasyonu kısıyor). Bu yüzden Canard duvar kağıdı sayfasını
-çizmeye devam eder, kareleri `grab()` ile alır (kilitliyken çalışan tek yol; SCK kilitliyken askıya alınıyor),
-donanım HEVC ile kodlar ve yerel TCP ile .saver'a gönderir. Ölçümler: tools/saver-probe, PLAN.md.
-
-Ekran başına tek yakalama + tek kodlayıcı (DisplayStream): legacyScreenSaver yeniden başlarken eski görünümü de
-canlandırıp aynı ekrana ikinci bağlantı açabiliyor (2026-11-22, 7 başlatmanın 2'si); her bağlantı ayrı kodlasaydı
-Retina'da kare başına ~21 ms iki katına çıkıp 30 kare/sn bütçesini aşıyordu. Aynı kareler tüm bağlantılara gider,
-yeni katılana anahtar kare zorlanır.
+Canard.saver içeriği kendisi çizemez (kilitli oturum, legacyScreenSaver kısıtları); Canard sayfayı çizer, kareyi
+yakalar, HEVC'ye kodlar ve yerel TCP ile gönderir. Ekran başına tek yakalama + tek kodlayıcı; aynı ekrana açılan
+her bağlantı aynı kareleri alır. Gerekçe ve ölçümler: PLAN.md, tools/saver-probe.
 
 Protokol (127.0.0.1:47391, tek yönlü kare akışı):
   .saver → Canard   tek satır JSON + "\\n": {"v": 1, "display": <CGDirectDisplayID>, "width": px, "height": px}
@@ -29,6 +23,8 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QImage
 from PySide6.QtNetwork import QHostAddress, QTcpServer
 from PySide6.QtQuickWidgets import QQuickWidget
+
+from canard.i18n import t
 
 log = logging.getLogger("canard.saver")
 
@@ -59,8 +55,7 @@ class DisplayStream(QObject):
         self._frames = 0
         self._dropped = 0
         self._capture_ms = 0.0
-        # QWebEngineView'in içindeki QQuickWidget: grabFramebuffer() doğrudan GPU tamponunu verir
-        # (Retina tam ekranda 9.3 ms; QWidget.grab()+toImage 16.7 ms).
+        # grabFramebuffer() GPU tamponunu doğrudan verir; QWidget.grab()'dan ~2 kat hızlı.
         self._quick = host.view.findChild(QQuickWidget)
         self.bitrate = int(width * height * fps * _BITS_PER_PIXEL_FRAME)
         self._encoder = adapter.create_video_encoder(width, height, fps, self.bitrate, self._on_output)
@@ -88,8 +83,7 @@ class DisplayStream(QObject):
         return len(self._sessions)
 
     def _capture(self) -> None:
-        # En yavaş Canard.saver belirler: karesi tek kodlandığı için birine atlamak hepsine atlamak demektir
-        # (atlanan P-karesi kod çözme zincirini bozar).
+        # Kare tek kodlandığı için en yavaş bağlantı belirler (atlanan P-karesi kod çözmeyi bozar).
         if any(session.backlogged for session in self._sessions):
             self._dropped += 1
             return
@@ -116,7 +110,7 @@ class DisplayStream(QObject):
             session.deliver(keyframe, hvcc, frame)
 
     def _report(self) -> None:
-        log.debug("%s: %.1f kare/sn gönderildi, yakalama+kodlama %.1f ms/kare, %d atlandı, %d oturum",
+        log.debug("%s: %.1f fps sent, capture+encode %.1f ms/frame, %d skipped, %d sessions",
                   self.name, self._frames / 10, self._capture_ms / max(1, self._frames), self._dropped,
                   len(self._sessions))
         self._frames = self._dropped = 0
@@ -152,7 +146,7 @@ class SaverSession(QObject):
         self._buffer += bytes(self._socket.readAll())
         if b"\n" not in self._buffer:
             if len(self._buffer) > _MAX_HANDSHAKE:
-                self._fail("el sıkışma çok uzun")
+                self._fail(t("Handshake too long"))
             return
         self._socket.readyRead.disconnect(self._read_handshake)
         line = self._buffer.split(b"\n", 1)[0]
@@ -161,28 +155,28 @@ class SaverSession(QObject):
             display = int(request["display"])
             width, height = int(request["width"]), int(request["height"])
         except (ValueError, KeyError, TypeError):
-            self._fail("geçersiz el sıkışma")
+            self._fail(t("Invalid handshake"))
             return
         if not (16 <= width <= 8192 and 16 <= height <= 8192):
-            self._fail("geçersiz boyut")
+            self._fail(t("Invalid size"))
             return
         try:
             stream, joined = self._server.stream_for(display, width & ~1, height & ~1)  # HEVC çift boyut ister
         except LookupError:
-            self._fail("bu ekranda Canard içeriği yok\nEkran Canard menüsü › Ekranlar'dan açılır")
+            self._fail(t("No Canard content on this screen\nTurn the screen on in the Canard menu › Screens"))
             return
         except (OSError, NotImplementedError) as error:
-            self._fail(f"kodlayıcı açılamadı: {error}")
+            self._fail(t("Could not open the encoder: {error}", error=error))
             return
         self._stream = stream
         hello = {"v": 1, "codec": "hvc1", "width": stream.width, "height": stream.height, "fps": stream.fps}
         self._socket.write(_packet(b"C", json.dumps(hello).encode()))
         stream.add(self)
         if joined:
-            log.info("ekran koruyucu bağlandı: %s · süren yayına katıldı (%d oturum, tek kodlama)", stream.name,
+            log.info("screensaver connected: %s · joined running stream (%d sessions, one encoder)", stream.name,
                      stream.sessions)
         else:
-            log.info("ekran koruyucu bağlandı: %s · %dx%d @ %d kare/sn · %.0f Mbit/sn", stream.name, stream.width,
+            log.info("screensaver connected: %s · %dx%d @ %d fps · %.0f Mbit/s", stream.name, stream.width,
                      stream.height, stream.fps, stream.bitrate / 1e6)
 
     def deliver(self, keyframe: bool, hvcc, frame: bytes) -> None:
@@ -198,7 +192,7 @@ class SaverSession(QObject):
         self._socket.write(frame)
 
     def _fail(self, message: str) -> None:
-        log.warning("ekran koruyucu bağlantısı reddedildi: %s", message)
+        log.warning("screensaver connection refused: %s", message)
         self._socket.write(_packet(b"E", message.encode()))
         self._socket.disconnectFromHost()
 
@@ -207,7 +201,7 @@ class SaverSession(QObject):
             return
         stream, self._stream = self._stream, None
         if stream is not None:
-            log.info("ekran koruyucu ayrıldı: %s", stream.name)
+            log.info("screensaver disconnected: %s", stream.name)
             stream.remove(self)
         socket, self._socket = self._socket, None
         socket.deleteLater()
@@ -218,7 +212,7 @@ class SaverStreamServer(QObject):
     """Yayın kapalıyken de dinler ve bağlananı nedeniyle reddeder: Canard.saver "Canard çalışmıyor" yerine bunu gösterir."""
 
     def __init__(self, manager, adapter, fps: int = DEFAULT_FPS, port: int = PORT, enabled: bool = True,
-                 off_hint: str = "", parent=None):
+                 off_hint=lambda: "", parent=None):
         super().__init__(parent)
         self._manager = manager
         self._adapter = adapter
@@ -229,14 +223,14 @@ class SaverStreamServer(QObject):
         self._streams: dict[tuple[int, int, int], DisplayStream] = {}
         self._server = QTcpServer(self)
         self._server.newConnection.connect(self._accept)
-        # Yalnız bu bilgisayardan erişilebilir; .saver kum havuzunda anahtar okuyamadığı için kimlik doğrulama yok.
+        # Yalnız yerel erişim; .saver kum havuzunda anahtar okuyamadığı için kimlik doğrulama yok.
         if self._server.listen(QHostAddress(QHostAddress.SpecialAddress.LocalHost), port):
             if enabled:
-                log.info("ekran koruyucu yayını hazır: 127.0.0.1:%d (Canard.saver bağlanınca başlar)", port)
+                log.info("screensaver stream ready: 127.0.0.1:%d (starts when Canard.saver connects)", port)
             else:
-                log.info("ekran koruyucu yayını kapalı (Canard.saver'a nedeni bildirilir)")
+                log.info("screensaver stream off (Canard.saver is told why)")
         else:
-            log.warning("ekran koruyucu yayını açılamadı (port %d: %s); Canard.saver içerik gösteremez",
+            log.warning("could not open the screensaver stream (port %d: %s); Canard.saver cannot show content",
                         port, self._server.errorString())
 
     def set_enabled(self, enabled: bool) -> None:
@@ -246,7 +240,7 @@ class SaverStreamServer(QObject):
         if not enabled:
             for session in list(self._sessions):
                 session.close()  # Canard.saver yeniden bağlanınca nedeni öğrenir
-        log.info("ekran koruyucu yayını %s", "açık" if enabled else "kapalı")
+        log.info("screensaver stream %s", "on" if enabled else "off")
 
     def set_fps(self, fps: int) -> None:
         """Yeni yayınlarda geçerli (süren yayın kendi hızıyla devam eder)."""
@@ -288,8 +282,8 @@ class SaverStreamServer(QObject):
             session.destroyed.connect(lambda *_, s=session: self._sessions.remove(s) if s in self._sessions else None)
 
     def _refuse(self, socket) -> None:
-        # El sıkışma okunmadan kapatılırsa TCP sıfırlanır ve mesaj karşıya ulaşmaz: önce satır okunur.
-        message = _packet(b"E", f"ekran koruyucu yayını kapalı\n{self._off_hint}".strip().encode())
+        # El sıkışma okunmadan kapatılırsa TCP sıfırlanır ve mesaj ulaşmaz.
+        message = _packet(b"E", f"{t('Screensaver stream is off')}\n{self._off_hint()}".strip().encode())
 
         def reply():
             socket.readAll()

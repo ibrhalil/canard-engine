@@ -1,11 +1,5 @@
-// Canard.saver — macOS'un gerçek ekran koruyucusu olarak Canard'ın canlı içeriğini gösterir (Faz 3a, yol B).
-//
-// macOS kilitli oturumda uygulama pencerelerini gizler ve legacyScreenSaver içinde WKWebView animasyonu
-// kısar (tools/saver-probe ölçümleri, PLAN.md). Bu yüzden içerik Canard'da çizilir; bu görünüm yalnızca
-// 127.0.0.1:47391'den gelen donanım HEVC karelerini AVSampleBufferDisplayLayer ile gösterir.
-// Protokol: canard/app/saver_stream.py.
-//
-// legacyScreenSaver tuzakları: stopAnimation her zaman çağrılmıyor ve görünümler bellekten atılmıyor →
+// Canard.saver — Canard'ın 127.0.0.1:47391'den yayınladığı HEVC karelerini gösteren macOS ekran koruyucusu.
+// Protokol: canard/app/saver_stream.py. legacyScreenSaver stopAnimation'ı her zaman çağırmadığı için
 // "willstop" bildirimi ve animateOneFrame bekçisi bağlantıyı keser.
 import AVFoundation
 import CoreMedia
@@ -16,9 +10,12 @@ import os
 private let saverLog = Logger(subsystem: "dev.canard.saver", category: "saver")
 private let streamPort: NWEndpoint.Port = 47391
 private let watchdogSeconds: TimeInterval = 2.0
-// Kareler Canard'daki yakalanma anlarına göre bu sabit gecikmeyle gösterilir: kodlama/ağ dalgalanması
-// takılma olarak görünmez (ilk sürümde DisplayImmediately ile her kare geldiği an gösteriliyordu).
+// Kareler yakalanma anlarına göre bu sabit gecikmeyle gösterilir: kodlama/ağ dalgalanması takılma yapmaz.
 private let playoutDelay = CMTime(value: 100, timescale: 1000)
+
+// Kullanıcıya görünen metinler sistem diline göre İngilizce ya da Türkçe.
+private let turkish = Locale.preferredLanguages.first?.hasPrefix("tr") ?? false
+private func localized(_ english: String, _ turkishText: String) -> String { turkish ? turkishText : english }
 
 @objc(CanardSaverView)
 final class CanardSaverView: ScreenSaverView {
@@ -69,7 +66,8 @@ final class CanardSaverView: ScreenSaverView {
             forName: Notification.Name("com.apple.screensaver.willstop"), object: nil, queue: .main
         ) { [weak self] _ in self?.halt("willstop") }
         if isPreview {
-            setMessage("Canard\nCanlı içerik, ekran koruyucu açıldığında Canard'dan gelir.")
+            setMessage(localized("Canard\nLive content comes from Canard when the screensaver starts.",
+                                 "Canard\nCanlı içerik, ekran koruyucu açıldığında Canard'dan gelir."))
         }
         saverLog.log("[\(self.sid, privacy: .public)] init preview=\(isPreview, privacy: .public) \(NSStringFromRect(frame), privacy: .public)")
     }
@@ -108,8 +106,7 @@ final class CanardSaverView: ScreenSaverView {
     }
 
     override func animateOneFrame() {
-        // Yalnız bekçi için. Yeniden bağlanma yalnız startAnimation'da: willstop'tan sonra kapanan görünüme
-        // gelen son animateOneFrame'ler yeniden bağlanmaya yol açıyordu (sahip testi, 2026-11-22).
+        // Yalnız bekçi için; yeniden bağlanma yalnız startAnimation'da (kapanan görünüme geç kareler gelebiliyor).
         lastTick = Date()
     }
 
@@ -122,22 +119,23 @@ final class CanardSaverView: ScreenSaverView {
         retry = nil
         connection?.cancel()
         connection = nil
-        saverLog.log("[\(self.sid, privacy: .public)] durdu (\(reason, privacy: .public)), \(self.frames) kare gösterildi, \(self.resyncs) saat eşitleme")
+        saverLog.log("[\(self.sid, privacy: .public)] stopped (\(reason, privacy: .public)), \(self.frames) frames shown, \(self.resyncs) clock resyncs")
     }
 
     private func check() {
         guard active else { return }
         let now = Date()
         if now.timeIntervalSince(lastTick) > watchdogSeconds {
-            halt("bekçi: animateOneFrame gelmiyor")
+            halt("watchdog: no animateOneFrame")
             return
         }
         if let refusal, now.timeIntervalSince(refusal.at) < 5 {
             setMessage("Canard: \(refusal.message)")  // yeniden denemeler arasında "çalışmıyor"a dönmesin
         } else if connection == nil {
-            setMessage("Canard çalışmıyor\nCanard uygulamasını aç  ·  ya da: uv run canard --mode wallpaper")
+            setMessage(localized("Canard is not running\nOpen the Canard app  ·  or: uv run canard --mode wallpaper",
+                                 "Canard çalışmıyor\nCanard uygulamasını aç  ·  ya da: uv run canard --mode wallpaper"))
         } else if now.timeIntervalSince(lastFrameAt) > watchdogSeconds && now.timeIntervalSince(connectedAt) > watchdogSeconds {
-            setMessage("Canard'dan görüntü bekleniyor…")
+            setMessage(localized("Waiting for frames from Canard…", "Canard'dan görüntü bekleniyor…"))
         }
     }
 
@@ -164,13 +162,13 @@ final class CanardSaverView: ScreenSaverView {
             guard let self, let conn else { return }
             switch state {
             case .ready:
-                saverLog.log("[\(self.sid, privacy: .public)] bağlandı: ekran \(display) \(width)x\(height)")
+                saverLog.log("[\(self.sid, privacy: .public)] connected: display \(display) \(width)x\(height)")
                 let hello = "{\"v\":1,\"display\":\(display),\"width\":\(width),\"height\":\(height)}\n"
                 conn.send(content: hello.data(using: .utf8), completion: .contentProcessed { _ in })
                 DispatchQueue.main.async { self.connectedAt = Date() }
                 self.receive(on: conn)
             case .failed(let error), .waiting(let error):
-                saverLog.log("[\(self.sid, privacy: .public)] bağlantı yok: \(String(describing: error), privacy: .public)")
+                saverLog.log("[\(self.sid, privacy: .public)] no connection: \(String(describing: error), privacy: .public)")
                 conn.cancel()
                 DispatchQueue.main.async {
                     if self.connection === conn { self.connection = nil }
@@ -198,7 +196,7 @@ final class CanardSaverView: ScreenSaverView {
                 self.drain()
             }
             if done || error != nil {
-                saverLog.log("[\(self.sid, privacy: .public)] bağlantı kapandı")
+                saverLog.log("[\(self.sid, privacy: .public)] connection closed")
                 conn.cancel()
                 DispatchQueue.main.async {
                     if self.connection === conn { self.connection = nil }
@@ -240,7 +238,7 @@ final class CanardSaverView: ScreenSaverView {
             if status == noErr {
                 format = description
             } else {
-                saverLog.error("[\(self.sid, privacy: .public)] biçim oluşturulamadı: \(status)")
+                saverLog.error("[\(self.sid, privacy: .public)] format could not be created: \(status)")
             }
         case UInt8(ascii: "F"):
             guard let format, payload.count > 9 else { return }
@@ -255,7 +253,7 @@ final class CanardSaverView: ScreenSaverView {
             }
         case UInt8(ascii: "E"):
             let message = String(data: payload, encoding: .utf8) ?? "?"
-            saverLog.log("[\(self.sid, privacy: .public)] Canard reddetti: \(message, privacy: .public)")
+            saverLog.log("[\(self.sid, privacy: .public)] refused by Canard: \(message, privacy: .public)")
             DispatchQueue.main.async {
                 self.refusal = (message, Date())
                 self.setMessage("Canard: \(message)")
@@ -296,7 +294,7 @@ final class CanardSaverView: ScreenSaverView {
         guard active else { return }
         let renderer = videoLayer.sampleBufferRenderer
         if renderer.status == .failed {
-            saverLog.error("[\(self.sid, privacy: .public)] çözücü hatası: \(String(describing: renderer.error), privacy: .public)")
+            saverLog.error("[\(self.sid, privacy: .public)] decoder error: \(String(describing: renderer.error), privacy: .public)")
             renderer.flush()
             timebaseRunning = false
             queue.async { self.waitingForKeyframe = true }

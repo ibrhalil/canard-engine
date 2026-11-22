@@ -1,10 +1,10 @@
-// Canard.app başlatıcısı (geliştirici uygulaması, docs/TASARIM-MACOS-GUNLUK.md §4.3).
-//
-// Depodaki Python'u (`<CanardRoot>/.venv/bin/python -m canard.app.main --tray`) doğrudan alt süreç olarak çalıştırır.
-// Uygulama Finder/`open` ile açılınca macOS izinleri (mikrofon, sistem sesi) bu paketin adına sorar ve bağlar:
-// TCC "sorumlu süreç" zinciri alt süreçlerden başlatıcıya çıkar. Bu yüzden sorumluluk bırakılmaz (disclaim yok),
-// Python çift fork yapmaz ve başlatıcı Python bitene kadar yaşar.
+// Canard.app başlatıcısı (docs/ARCHITECTURE.md): depodaki `.venv` Python'unu `--tray` ile alt süreç
+// olarak çalıştırır ve o bitene kadar yaşar; böylece macOS izinleri (TCC) Canard.app adına sorulur.
 import AppKit
+
+// Kullanıcıya görünen metinler sistem diline göre İngilizce ya da Türkçe.
+private let turkish = Locale.preferredLanguages.first?.hasPrefix("tr") ?? false
+private func localized(_ english: String, _ turkishText: String) -> String { turkish ? turkishText : english }
 
 final class Launcher: NSObject, NSApplicationDelegate {
     private var child: Process?
@@ -22,11 +22,13 @@ final class Launcher: NSObject, NSApplicationDelegate {
             signalSources.append(source)
         }
         guard let root = Bundle.main.object(forInfoDictionaryKey: "CanardRoot") as? String else {
-            fail("Info.plist'te CanardRoot yok. Uygulamayı native/macos-app/build.sh ile yeniden derle.")
+            fail(localized("CanardRoot is missing from Info.plist. Rebuild the app with native/macos-app/build.sh.",
+                           "Info.plist'te CanardRoot yok. Uygulamayı native/macos-app/build.sh ile yeniden derle."))
         }
         let python = root + "/.venv/bin/python"
         guard FileManager.default.isExecutableFile(atPath: python) else {
-            fail("Python ortamı bulunamadı:\n\(python)\n\nProje klasöründe `uv sync` çalıştır.")
+            fail(localized("Python environment not found:\n\(python)\n\nRun `uv sync` in the project folder.",
+                           "Python ortamı bulunamadı:\n\(python)\n\nProje klasöründe `uv sync` çalıştır."))
         }
 
         let process = Process()
@@ -38,8 +40,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
         environment["PYTHONUNBUFFERED"] = "1"
         environment["NO_COLOR"] = "1"
         process.environment = environment
-        // Python'un terminal çıktısı (Qt/Chromium yerel mesajları dahil) her açılışta baştan yazılır;
-        // Canard'ın kendi logu ayrıca ~/Library/Logs/Canard/canard.log'da.
+        // Ham terminal çıktısı her açılışta baştan yazılır; Canard'ın kendi logu canard.log'da.
         if let output = openLog() {
             process.standardOutput = output
             process.standardError = output
@@ -50,7 +51,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
         do {
             try process.run()
         } catch {
-            fail("Canard başlatılamadı: \(error.localizedDescription)")
+            fail(localized("Canard could not be started: ", "Canard başlatılamadı: ") + error.localizedDescription)
         }
         child = process
     }
@@ -72,8 +73,10 @@ final class Launcher: NSObject, NSApplicationDelegate {
         }
         let status = process.terminationStatus
         if status != 0 {
-            let reason = process.terminationReason == .uncaughtSignal ? "sinyal \(status)" : "çıkış kodu \(status)"
-            alert("Canard beklenmedik şekilde kapandı (\(reason)).\n\n\(logTail())\n\nLog: ~/Library/Logs/Canard/")
+            let reason = process.terminationReason == .uncaughtSignal
+                ? localized("signal \(status)", "sinyal \(status)") : localized("exit code \(status)", "çıkış kodu \(status)")
+            alert(localized("Canard quit unexpectedly (\(reason)).", "Canard beklenmedik şekilde kapandı (\(reason)).")
+                  + "\n\n\(logTail())\n\nLog: ~/Library/Logs/Canard/")
         }
         exit(status == 0 ? 0 : 1)
     }

@@ -1,8 +1,5 @@
-"""Merkezi log kurulumu: terminal (seviye seçilebilir, renkli) + isteğe bağlı dosya (her zaman debug).
-
-Bileşenler `canard.<ad>` logger'larıyla yazar (audio, web, ekran, kısayol…). Qt mesajları `qt`, sayfa
-konsolu `web` adıyla aynı kanala akar. Chromium'un kendi stderr günlüğü yalnız debug düzeyinde açıktır.
-"""
+"""Log kurulumu: terminal (seviye seçilebilir, renkli) + isteğe bağlı dosya (her zaman debug). Qt mesajları `qt`,
+sayfa konsolu `web` adıyla aynı kanala akar."""
 
 import faulthandler
 import logging
@@ -16,9 +13,9 @@ LEVELS = {"debug": logging.DEBUG, "info": logging.INFO, "warning": logging.WARNI
 _COLORS = {logging.DEBUG: "\033[2m", logging.WARNING: "\033[33m", logging.ERROR: "\033[31m",
            logging.CRITICAL: "\033[1;31m"}
 _RESET = "\033[0m"
-_LABELS = {"DEBUG": "DEBUG", "INFO": "INFO", "WARNING": "UYARI", "ERROR": "HATA", "CRITICAL": "KRİTİK"}
+_LABELS = {"DEBUG": "DEBUG", "INFO": "INFO", "WARNING": "WARN", "ERROR": "ERROR", "CRITICAL": "CRIT"}
 
-# Qt'nin zararsız ama gürültülü kategorileri: yalnız debug'da görünür.
+# Zararsız ama gürültülü Qt kategorileri: yalnız debug'da.
 _QT_NOISE = ("qt.qpa.fonts", "propagateSizeHints", "qt.webenginecontext", "SKIA:")
 
 _file_stream = None
@@ -69,21 +66,20 @@ def setup(level: str = "info", log_file: Path | None = None) -> None:
         handler.setLevel(logging.DEBUG)
         handler.setFormatter(_Formatter(color=False, with_date=True))
         root.addHandler(handler)
-        # Segfault gibi yerel çökmelerde Python yığın izi de dosyaya düşsün.
         _file_stream = open(log_file, "a", encoding="utf-8")
         faulthandler.enable(file=_file_stream, all_threads=True)
     else:
         faulthandler.enable(all_threads=True)
 
     sys.excepthook = _excepthook
-    # Chromium stderr günlüğü (GPU/IPC iç hataları) yalnız debug'da: 0=INFO … 3=FATAL.
+    # Chromium stderr günlüğü yalnız debug'da (0=INFO … 3=FATAL).
     chromium_level = "1" if level == "debug" else "3"
     flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
     if "--log-level" not in flags:
         os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = f"{flags} --log-level={chromium_level}".strip()
 
     if log_file is not None:
-        logging.getLogger("canard").debug("log dosyası: %s", log_file)
+        logging.getLogger("canard").debug("log file: %s", log_file)
 
 
 def install_qt_handler() -> None:
@@ -112,4 +108,4 @@ def _excepthook(exc_type, exc, tb) -> None:
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc, tb)
         return
-    logging.getLogger("canard").critical("yakalanmamış hata", exc_info=(exc_type, exc, tb))
+    logging.getLogger("canard").critical("uncaught exception", exc_info=(exc_type, exc, tb))

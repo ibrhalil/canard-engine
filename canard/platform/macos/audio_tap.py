@@ -1,12 +1,8 @@
-"""Core Audio Process Tap (macOS 14.2+) ile sistem sesi yakalama.
+"""Core Audio Process Tap (macOS 14.2+) ile sistem sesi: global stereo tap (kendi süreci hariç) + özel aggregate
+device, IOProc ctypes ile. Varsayılan çıkış aygıtı değişince yeniden kurulur.
 
-Global stereo tap (kendi süreci hariç) + özel aggregate device kurulur; IOProc ctypes ile bağlanır.
-Varsayılan çıkış aygıtı değişince (kulaklık takıldı/çıktı) tap yeniden kurulur.
-
-pyobjc tuzakları (tools/audio-probe spike'ında bulundu):
-- aggregate/tap sözlük anahtarı sabitleri bytes gelir; CFString'e çevrilmezse coreaudio SEGV verir,
-- iç içe Python list/dict vekil nesne olur; plist turuyla saf Foundation nesnesine çevrilir,
-- AudioHardwareCreateAggregateDevice'ın CFDictionaryRef parametresi ctypes ile verilir.
+pyobjc tuzakları: sözlük anahtarı sabitleri bytes gelir (str'ye çevrilmezse SEGV), iç içe list/dict plist turuyla
+saf Foundation nesnesine çevrilir, CFDictionaryRef parametresi ctypes ile verilir.
 """
 
 import ctypes
@@ -84,7 +80,7 @@ def _get(obj_id, selector, size, qualifier=None) -> bytes:
 
 def _check(status, what) -> None:
     if status != 0:
-        raise OSError(f"{what} başarısız: OSStatus {status}")
+        raise OSError(f"{what} failed: OSStatus {status}")
 
 
 def _k(key) -> str:
@@ -95,7 +91,7 @@ def _plist(value):
     data, error = NSPropertyListSerialization.dataWithPropertyList_format_options_error_(
         value, NSPropertyListBinaryFormat_v1_0, 0, None)
     if data is None:
-        raise ValueError(f"Geçersiz aggregate sözlüğü: {error}")
+        raise ValueError(f"invalid aggregate dictionary: {error}")
     plist, _fmt, _error = NSPropertyListSerialization.propertyListWithData_options_format_error_(data, 0, None, None)
     return plist
 
@@ -134,10 +130,6 @@ class SystemAudioTap:
                                                CA.kAudioObjectPropertyElementMain)
         self._listening = False
         self.format: AudioFormat | None = None
-
-    @property
-    def running(self) -> bool:
-        return bool(self._agg_id)
 
     def start(self) -> AudioFormat:
         with self._lock:
@@ -223,7 +215,7 @@ class SystemAudioTap:
         if count < 1:
             return 0
         buffers = ctypes.cast(ctypes.addressof(abl.mBuffers), ctypes.POINTER(_AudioBuffer * count)).contents
-        # Interleaved: tek tampon tüm kanalları taşır. Planar: kanal düzlemleri art arda eklenir (f32-planar).
+        # Planar biçimde kanal düzlemleri art arda eklenir.
         data = b"".join(ctypes.string_at(b.mData, b.mDataByteSize) for b in buffers if b.mData and b.mDataByteSize)
         if data:
             self._on_chunk(data)

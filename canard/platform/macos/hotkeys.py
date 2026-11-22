@@ -41,7 +41,7 @@ CONTROL = 1 << 12
 
 KEY_LEFT = 0x7B
 KEY_RIGHT = 0x7C
-# Sanal tuş kodları fiziksel konumdur (kVK_ANSI_*): Q klavyede (TR/US) aynı tuşlar.
+# Sanal tuş kodları fiziksel konumdur (kVK_ANSI_*).
 KEY_H = 0x04
 KEY_Y = 0x10
 KEY_P = 0x23
@@ -49,8 +49,7 @@ KEY_L = 0x25
 KEY_K = 0x28
 KEY_N = 0x2D
 
-# ⌘⌥←/→ JetBrains (Navigate Back/Forward) ve Chrome (sekme) ile çakıştığı için ⌃⌥⌘ kullanılır. Sol el ⌃⌥⌘'yi
-# tuttuğu için harfler klavyenin sağ yarısından seçildi (sahip, 2026-11-22).
+# ⌘⌥ JetBrains ve Chrome ile çakışıyor; ⌃⌥⌘ sol elde, harfler klavyenin sağ yarısından.
 _HYPER = CONTROL | OPTION | CMD
 _PREFIX = "⌃ + ⌥ + ⌘ + "
 DEFAULT_BINDINGS = {
@@ -99,7 +98,7 @@ class HotkeyRegistry:
             None, ctypes.byref(self._handler_ref),
         )
         if status != 0:
-            raise OSError(f"InstallEventHandler başarısız: {status}")
+            raise OSError(f"InstallEventHandler failed: {status}")
 
     def register(self, key_code: int, modifiers: int, callback: Callable[[], None]) -> bool:
         hotkey_id = len(self._callbacks) + 1
@@ -135,5 +134,5 @@ class HotkeyRegistry:
                 try:
                     callback()
                 except Exception as error:
-                    logging.getLogger("canard.hotkey").exception("kısayol işleyicisi hata verdi: %r", error)
+                    logging.getLogger("canard.hotkey").exception("shortcut handler failed: %r", error)
         return 0

@@ -1,5 +1,7 @@
+import logging
 import mimetypes
 import re
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,6 +18,8 @@ _MIME_OVERRIDES = {
     ".wasm": "application/wasm",
     ".webmanifest": "application/manifest+json; charset=utf-8",
 }
+
+log = logging.getLogger("canard.server")
 
 _RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
 _CHUNK = 64 * 1024
@@ -72,8 +76,7 @@ class _Handler(BaseHTTPRequestHandler):
                         self.wfile.write(chunk)
                         remaining -= len(chunk)
             except (BrokenPipeError, ConnectionResetError):
-                # Medya öğeleri kısmi istekleri sık sık yarıda keser; hata değil.
-                pass
+                pass  # medya öğeleri kısmi istekleri sık sık yarıda keser
 
     def _parse_range(self, size: int):
         """None: Range yok/yok sayıldı · (start, end): tek aralık · False: karşılanamaz (416)."""
@@ -122,15 +125,11 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, format, *args):
-        import logging
-
-        logging.getLogger("canard.server").debug("%s %s", self.address_string(), format % args)
+        log.debug("%s %s", self.address_string(), format % args)
 
 
 class _Server(ThreadingHTTPServer):
     def handle_error(self, request, client_address):
-        import sys
-
         if isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError)):
             return
         super().handle_error(request, client_address)
@@ -139,7 +138,7 @@ class _Server(ThreadingHTTPServer):
 class StaticFileServer:
     def __init__(self, root: Path, port: int = 0):
         self.root = Path(root).resolve()
-        # Sabit port → sabit origin (http://127.0.0.1:PORT): localStorage/çerezler yeniden başlatmada korunur.
+        # Sabit port → sabit origin: içeriğin localStorage'ı yeniden başlatmada korunur.
         try:
             self._httpd = _Server(("127.0.0.1", port), _Handler)
         except OSError:

@@ -1,20 +1,17 @@
-"""Çalışma zamanı: duvar kağıdı + Canard.saver yayını ve çalışırken değişebilen ayarlar.
-
-CLI (`--mode wallpaper|screensaver`) ve menü çubuğu (`--tray`) aynı nesneyi kullanır. Kaynak, boot script, duvar
-kağıdı, etkileşimli mod, sistem sesi ve yayın uygulama kapanmadan değiştirilebilir; sayfa yalnız gerektiğinde
-(kaynak, boot script, sistem sesi) yeniden yüklenir.
-"""
+"""Çalışma zamanı: duvar kağıdı, Canard.saver yayını ve çalışırken değişebilen ayarlar (CLI ve menü çubuğu ortak)."""
 
 import logging
 import sys
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from canard.app.application import OCCLUSION_GRACE_MS, WallpaperManager
 from canard.app.saver_stream import DEFAULT_FPS
+from canard.app.wallpaper import OCCLUSION_GRACE_MS, WallpaperManager
 from canard.audio.hub import SystemAudioHub
 from canard.content.sources import SourceError
+from canard.i18n import t
 from canard.platform.base import detect
+from canard.web import policy
 from canard.web import system_audio as system_audio_script
 from canard.web.bridge import HostBridge
 
@@ -30,7 +27,7 @@ class Runtime(QObject):
                  system_audio: bool = True, saver_stream: bool = True, saver_fps: int | None = None,
                  screensaver_after: float | None = None, disabled_screens=(), parent=None):
         super().__init__(parent)
-        self._app = app  # CanardApp: kaynak kaydı ve yerel sunucular
+        self._app = app  # CanardApp
         self._profile = profile
         self._adapter = detect()
         self.wallpaper = wallpaper
@@ -39,18 +36,14 @@ class Runtime(QObject):
         self.saver_stream = saver_stream and sys.platform == "darwin"
         self.saver_fps = saver_fps or DEFAULT_FPS
         self._screensaver_after = screensaver_after
-        # Yayın kapalıyken Canard.saver'da görünen ipucu (menü çubuğu kendi yolunu yazar).
-        self.saver_off_hint = "Açmak için Canard'ı --no-saver-stream olmadan başlat"
+        self.saver_off_hint = t("To turn it on, start Canard without --no-saver-stream")
         self.disabled_screens: set[str] = set(disabled_screens)
         self.source = None
         self.url = None
-        # Hub her sayfaya bağlanır; yakalama yalnız bir sayfa ses isteyince başlar. Sistem sesi kapalıyken
-        # sayfaya köprü betiği eklenmez, içerik hub'a ulaşamaz.
+        # Yakalama yalnız bir sayfa ses isteyince başlar; sistem sesi kapalıyken köprü betiği eklenmez.
         self._audio_hub = SystemAudioHub(self._adapter, self)
         self._audio_hub.started.connect(lambda: self._check_permission("system_audio"))
         self.mic_requested = False
-        from canard.web import policy
-
         policy.media_listeners.append(self._on_media_request)
         self._manager = None
         self._stream = None
@@ -75,7 +68,7 @@ class Runtime(QObject):
             self._start()
         else:
             self._manager.load(url, source.boot_script)
-        log.info("kaynak: %s (%s) · %s%s", source.name, source.type, url,
+        log.info("source: %s (%s) · %s%s", source.name, source.type, url,
                  " · boot script" if source.boot_script else "")
         self.changed.emit()
 
@@ -87,7 +80,7 @@ class Runtime(QObject):
         self._install_scripts()
         if self._manager is not None:
             self._manager.load(self.url, boot_script)
-        log.info("boot script %s", "bağlandı" if boot_script else "kaldırıldı")
+        log.info("boot script %s", "attached" if boot_script else "removed")
         self.changed.emit()
 
     def set_wallpaper(self, enabled: bool) -> None:
@@ -104,7 +97,7 @@ class Runtime(QObject):
             self.disabled_screens.add(name)
         if self._manager is not None:
             self._manager.set_disabled_screens(self.disabled_screens)
-        log.info("ekran %s: %s", "açık" if enabled else "kapalı", name)
+        log.info("screen %s: %s", "on" if enabled else "off", name)
         self.changed.emit()
 
     def send_key(self, key: str) -> None:
@@ -120,7 +113,7 @@ class Runtime(QObject):
 
     def reload(self) -> None:
         if self._manager is not None:
-            log.info("sayfa yeniden yükleniyor")
+            log.info("reloading page")
             self._manager.reload()
 
     def next_source(self) -> None:
@@ -135,8 +128,8 @@ class Runtime(QObject):
         try:
             self.set_source(target)
         except SourceError as error:
-            log.warning("kaynak açılamadı: %s", error)
-            self.error.emit(f"Kaynak açılamadı ({target.name}): {error}")
+            log.warning("could not open source: %s", error)
+            self.error.emit(t("Could not open source ({name}): {error}", name=target.name, error=error))
 
     def set_interactive(self, enabled: bool) -> None:
         if self._manager is None:
@@ -150,7 +143,7 @@ class Runtime(QObject):
         self._install_scripts()
         if self._manager is not None:
             self._manager.reload()
-        log.info("sistem sesi köprüsü %s", "açık" if enabled else "kapalı")
+        log.info("system audio bridge %s", "on" if enabled else "off")
         self.changed.emit()
 
     def set_saver_stream(self, enabled: bool) -> None:
@@ -165,7 +158,7 @@ class Runtime(QObject):
         self.saver_fps = fps
         if self._stream is not None:
             self._stream.set_fps(fps)
-        log.info("ekran koruyucu kare hızı: %d (yeni bağlantılarda)", fps)
+        log.info("screensaver frame rate: %d (for new connections)", fps)
         self.changed.emit()
 
     def start_screensaver(self) -> None:
@@ -176,9 +169,9 @@ class Runtime(QObject):
         try:
             self._adapter.app_integration().start_screensaver()
         except NotImplementedError:
-            log.warning("bu platformda ekran koruyucu başlatılamıyor")
+            log.warning("cannot start the screensaver on this platform")
             return
-        log.info("ekran koruyucu başlatıldı")
+        log.info("screensaver started")
 
     def permission_status(self, kind: str) -> str | None:
         try:
@@ -193,16 +186,13 @@ class Runtime(QObject):
     def _check_permission(self, kind: str, retry: bool = True) -> None:
         status = self.permission_status(kind)
         if status == "denied":
-            log.warning("%s izni kapalı: içerik bu sesi alamaz", "sistem sesi kaydı" if kind == "system_audio"
-                        else "mikrofon")
+            log.warning("%s permission denied: the content cannot receive this audio", kind)
             self.permission_needed.emit(kind)
         elif status == "unknown" and retry:
             # İlk kullanımda macOS kendi izin penceresini açar; kullanıcı yanıtladıktan sonra yeniden bakılır.
             QTimer.singleShot(8000, lambda: self._check_permission(kind, retry=False))
 
     def close(self) -> None:
-        from canard.web import policy
-
         if self._on_media_request in policy.media_listeners:
             policy.media_listeners.remove(self._on_media_request)
         if self._stream is not None:
@@ -233,7 +223,6 @@ class Runtime(QObject):
         manager.interactiveChanged.connect(self._on_interactive)
         manager.pausedChanged.connect(lambda _paused: self.changed.emit())
         manager.occlusion_grace_ms = OCCLUSION_GRACE_MS if self.saver_stream else 0
-        # Kısayol, denetleyici oluşmadan kaydedilir; çağrıldığında denetleyiciye yönlenir.
         manager.start({
             "screensaver_now": self.start_screensaver,
             "toggle_wallpaper": self.toggle_wallpaper,
@@ -246,12 +235,13 @@ class Runtime(QObject):
             try:
                 self._screensaver = ScreensaverController(manager, self._adapter, self._screensaver_after * 60, self)
             except NotImplementedError:
-                logging.getLogger("canard.screensaver").error("bu platformda ekran koruyucu henüz yok")
+                logging.getLogger("canard.screensaver").error("no screensaver on this platform yet")
         if sys.platform == "darwin":
             from canard.app.saver_stream import SaverStreamServer
 
             self._stream = SaverStreamServer(self._manager, self._adapter, fps=self.saver_fps,
-                                             enabled=self.saver_stream, off_hint=self.saver_off_hint, parent=self)
+                                             enabled=self.saver_stream, off_hint=lambda: self.saver_off_hint,
+                                             parent=self)
 
     def _on_interactive(self, enabled: bool) -> None:
         self.interactive = enabled
