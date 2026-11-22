@@ -4,11 +4,13 @@
 #   native/macos-saver/build.sh            → build/Canard.saver
 #   native/macos-saver/build.sh --open     → derle ve kurulum penceresini aç
 # Kaldırmak: rm -rf ~/Library/Screen\ Savers/Canard.saver
+# Küçük resim canard/resources/canard-macos.svg'den depodaki .venv'in Qt'siyle üretilir (native/render_icon.py).
 set -euo pipefail
 here=${0:A:h}
-out="$here/../../build/Canard.saver"
+root=${here:h:h}
+out="$root/build/Canard.saver"
 rm -rf "$out"
-mkdir -p "$out/Contents/MacOS"
+mkdir -p "$out/Contents/MacOS" "$out/Contents/Resources"
 cat > "$out/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -35,6 +37,7 @@ for arch in arm64 x86_64; do
 done
 lipo -create "$tmp/Canard-arm64" "$tmp/Canard-x86_64" -output "$out/Contents/MacOS/Canard"
 rm -rf "$tmp"
+"$root/.venv/bin/python" "$root/native/render_icon.py" thumbnail "$out/Contents/Resources"
 codesign --force --sign - "$out" >/dev/null 2>&1
 echo "derlendi: ${out:A}"
 if [[ "${1:-}" == "--open" ]]; then

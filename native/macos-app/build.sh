@@ -38,6 +38,7 @@ cat > "$out/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
+  <key>CFBundleIconFile</key><string>Canard</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>GPL-3.0</string>
@@ -54,6 +55,7 @@ for arch in arm64 x86_64; do
 done
 lipo -create "$tmp/Canard-arm64" "$tmp/Canard-x86_64" -output "$out/Contents/MacOS/Canard"
 rm -rf "$tmp"
+"$root/.venv/bin/python" "$root/native/render_icon.py" icns "$out/Contents/Resources/Canard.icns"
 
 ditto "$root/build/Canard.saver" "$out/Contents/Resources/Canard.saver"
 sign() {

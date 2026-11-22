@@ -1,11 +1,12 @@
 import logging
 import sys
 import time
+from pathlib import Path
 
 import canard
 import shiboken6
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication, QPalette
+from PySide6.QtGui import QGuiApplication, QIcon, QPalette
 from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
 
 from canard.app.settings import SettingsStore, default_settings_path
@@ -483,6 +484,10 @@ class CanardApp:
         app.setApplicationName("Canard")
         app.setOrganizationName("Canard")
         app.setApplicationVersion(canard.__version__)
+        # Qt pencereleri ve iletişim kutuları (macOS'ta NSApp ikonu) Python roketi yerine Canard ikonunu göstersin.
+        # macOS biçimi Apple ızgarasında (kenar boşluklu), diğerleri tuvali dolduran biçim.
+        icon = "canard-macos.svg" if sys.platform == "darwin" else "canard.svg"
+        app.setWindowIcon(QIcon(str(Path(canard.__file__).parent / "resources" / icon)))
         if tray:
             try:
                 detect().app_integration().set_accessory()  # Dock simgesi hiç görünmesin diye en başta

@@ -26,4 +26,4 @@ canard = "canard.app.main:main"
 include = ["canard*"]
 
 [tool.setuptools.package-data]
-canard = ["web/*.js"]
+canard = ["web/*.js", "resources/*.svg"]
