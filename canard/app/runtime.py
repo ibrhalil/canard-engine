@@ -48,6 +48,7 @@ class Runtime(QObject):
         self._manager = None
         self._stream = None
         self._screensaver = None
+        self._menu_bar = None  # MenuBarTint (macOS)
         self._install_scripts()
 
     @property
@@ -92,6 +93,10 @@ class Runtime(QObject):
         self._install_scripts()  # window.canard.mode sonraki yüklemede güncellenir
         if self._manager is not None:
             self._manager.set_show_wallpaper(enabled)
+        if self._menu_bar is not None and enabled:
+            self._menu_bar.wallpaper_shown()
+        elif self._menu_bar is not None:
+            self._menu_bar.restore()  # gizliyken masaüstü görünür: kullanıcının resmi geri
         self.changed.emit()
 
     def set_screen_enabled(self, name: str, enabled: bool) -> None:
@@ -227,6 +232,9 @@ class Runtime(QObject):
             self._screensaver.close()
             self._screensaver = None
         self._audio_hub.shutdown()
+        if self._menu_bar is not None:
+            self._menu_bar.close()  # kullanıcının masaüstü resmi geri konur
+            self._menu_bar = None
         if self._manager is not None:
             self._manager.close()
             self._manager = None
@@ -246,6 +254,10 @@ class Runtime(QObject):
         manager.interactiveChanged.connect(self._on_interactive)
         manager.pausedChanged.connect(lambda _paused: self.changed.emit())
         manager.occlusion_grace_ms = OCCLUSION_GRACE_MS if self.saver_stream else 0
+        if sys.platform == "darwin":
+            from canard.app.menu_bar_tint import MenuBarTint
+
+            self._menu_bar = MenuBarTint(manager, self._adapter, self._app.store, self)
         manager.start({
             "screensaver_now": self.start_screensaver,
             "toggle_wallpaper": self.toggle_wallpaper,
@@ -268,4 +280,6 @@ class Runtime(QObject):
 
     def _on_interactive(self, enabled: bool) -> None:
         self.interactive = enabled
+        if not enabled and self._menu_bar is not None:
+            self._menu_bar.interactive_ended()
         self.changed.emit()

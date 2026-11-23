@@ -21,6 +21,7 @@ _SCREEN_SETTLE_MS = 500
 # Çıkarılan ekranın sayfası bu süre park edilir; ekran dönerse sayfa (sessionStorage dahil) kaldığı yerden sürer.
 _PARK_SECONDS = 600
 _REFRESH_DELAY_MS = 250
+_STALE_GAP_MS = 150  # iki ekran örneği arası: içerik akıyorsa bu sürede değişir
 _REFRESH_SETTLE_MS = 500
 # Ekran koruyucu başlarken macOS önce "örtülü" bildirir, Canard.saver ~1 sn sonra bağlanır: hemen dondurmak sesi keser.
 OCCLUSION_GRACE_MS = 3000
@@ -42,6 +43,7 @@ def _screen_key(screen) -> int | None:
 class WallpaperManager(QObject):
     interactiveChanged = Signal(bool)
     pausedChanged = Signal(bool)
+    pageLoaded = Signal()
 
     def __init__(self, engine: WebEngine, url: str, boot_script: str | None = None,
                  interactive: bool = False, audio_hub=None, show_wallpaper: bool = True, parent=None):
@@ -279,6 +281,7 @@ class WallpaperManager(QObject):
         palette.setColor(QPalette.ColorRole.Window, Qt.GlobalColor.black)
         window.setPalette(palette)
         host = self._engine.create_host(boot_script=self._boot_script, audio_hub=self._audio_hub)
+        host.loaded.connect(self.pageLoaded)
         layout = QVBoxLayout(window)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(host)
@@ -322,6 +325,16 @@ class WallpaperManager(QObject):
             shiboken6.delete(entry.window)
         else:
             entry.window.deleteLater()
+
+    def pages(self) -> list:
+        """(sayfa, ekran) — bağlı ekranlardaki sayfalar."""
+        return [(entry.host, entry.screen) for entry in self._windows]
+
+    def refresh_window(self, host) -> None:
+        """Pencereyi yeniden sıralar (bkz. _refresh_window)."""
+        entry = next((e for e in self._windows if e.host is host), None)
+        if entry is not None:
+            self._refresh_window(host, entry.screen.name())
 
     def send_key(self, key: str) -> None:
         hotkey_log.debug("key to content: %s", key)
@@ -435,9 +448,32 @@ class WallpaperManager(QObject):
                       self.occlusion_grace_ms)
             return
         host.set_suspended(not visible)
-        if visible:
-            QTimer.singleShot(_REFRESH_DELAY_MS, host, lambda: self._refresh_window(host, screen_name))
+        if visible and host.refresh_after_occlusion:
+            QTimer.singleShot(_REFRESH_DELAY_MS, host, lambda: self._check_stale(host, screen_name))
         log.info("%s: %s", screen_name, "resumed" if visible else "paused (occluded)")
+
+    def _check_stale(self, host: WebHost, screen_name: str) -> None:
+        """Pencere yalnız ekranda eski karede takılıysa yeniden sıralanır (yeniden sıralama kısa bir takılma yapar)."""
+        entry = next((e for e in self._windows if e.host is host), None)
+        if entry is None:
+            return
+        try:
+            first = self._adapter.window_fingerprint(entry.window)
+        except NotImplementedError:
+            self._refresh_window(host, screen_name)
+            return
+
+        def compare() -> None:
+            if not shiboken6.isValid(entry.window):
+                return
+            second = self._adapter.window_fingerprint(entry.window)
+            if first is not None and second is not None and first != second:
+                log.debug("%s: window is drawing after occlusion, no refresh needed", screen_name)
+                return
+            log.debug("%s: window frame unchanged after occlusion", screen_name)
+            self._refresh_window(host, screen_name)
+
+        QTimer.singleShot(_STALE_GAP_MS, host, compare)
 
     def _refresh_window(self, host: WebHost, screen_name: str) -> None:
         """Örtülü → görünür sonrası macOS pencerenin eski karesini gösterebiliyor: pencere yeniden sıralanarak tazelenir."""

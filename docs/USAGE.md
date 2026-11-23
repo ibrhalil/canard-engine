@@ -37,6 +37,8 @@ Frequent commands are at the top, everything else is grouped:
 | Settings ▸ | System Audio (page reloads on change) · Web Engine ▸ WebKit / Chromium (pages reload; content data is separate per engine) · Language ▸ · Open at Login (LaunchAgent, shown as "Canard" in Login Items) · Permissions ▸ (state and System Settings shortcuts) · Open Log Folder |
 | About Canard · Quit Canard | About shows versions and the settings, content data and log folders |
 
+**Menu bar color.** macOS takes the menu bar color only from the system desktop picture, never from Canard's window. While Canard runs, a frame of the content is used as each screen's desktop picture; it is refreshed when a page loads (source, engine, new screen) and when interactive mode ends (where content modes are usually picked) — never in the background. Your own picture is put back when Canard quits or the wallpaper is hidden (and on the next start after a crash). This only happens when your desktop is a still picture file: a color or dynamic wallpaper cannot be put back exactly, so Canard leaves it alone. To get the effect with a plain look, choose a solid image (for example black) as the desktop picture. While Canard runs, the lock screen shows the content frame too.
+
 Only one Canard can run at a time; a second one exits with "Canard is already running".
 
 **Code signing.** If a code signing certificate named **Canard Dev** is in your keychain, `build.sh` uses it (another name: `CANARD_SIGN_IDENTITY="<name>"`); otherwise it signs ad-hoc and macOS may ask for permissions again after every rebuild. Create one once, no Apple account needed: Keychain Access › Certificate Assistant › Create a Certificate… → Name `Canard Dev`, Identity Type *Self-Signed Root*, Certificate Type *Code Signing*.

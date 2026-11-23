@@ -82,10 +82,30 @@ class MacAdapter(PlatformAdapter):
 
         reorder_window(widget)
 
+    def window_fingerprint(self, widget) -> bytes | None:
+        from canard.platform.macos.wallpaper import window_fingerprint
+
+        return window_fingerprint(widget)
+
     def create_video_encoder(self, width: int, height: int, fps: int, bitrate: int, on_output):
         from canard.platform.macos.video import HevcEncoder
 
         return HevcEncoder(width, height, fps, bitrate, on_output)
+
+    def desktop_picture(self, display_id: int) -> dict | None:
+        from canard.platform.macos import desktop
+
+        return desktop.current(display_id)
+
+    def set_desktop_picture(self, display_id: int, picture: dict) -> None:
+        from canard.platform.macos import desktop
+
+        desktop.apply(display_id, picture)
+
+    def write_desktop_frame(self, image, path) -> dict:
+        from canard.platform.macos import desktop
+
+        return desktop.write_frame(image, path)
 
     def app_integration(self):
         from canard.platform.macos import app

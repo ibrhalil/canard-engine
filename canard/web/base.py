@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QEventLoop, Qt, QTimer
+from PySide6.QtCore import QEventLoop, Qt, QTimer, Signal
 from PySide6.QtWidgets import QLabel, QPushButton, QStackedLayout, QVBoxLayout, QWidget
 
 from canard.i18n import t
@@ -78,6 +78,11 @@ class WebEngine:
 class WebHost(QWidget):
     """Tek sayfa. Alt sınıf görünümü `_set_view` ile verir ve `_load`, `run_js`, `_apply_suspended`, `grab_frame`'i
     sağlar; yükleme bitince `_loaded(ok)`, içerik süreci ölünce `_show_error()` çağırır."""
+
+    loaded = Signal()  # içerik yüklendi (boş sayfaya geçiş sayılmaz)
+    # Örtülme sonrası macOS pencerenin eski karesini gösterebiliyor mu (Qt'nin çizdiği görünüm): WallpaperManager
+    # görünür olunca pencereyi yeniden sıralar; bedeli kısa bir takılma.
+    refresh_after_occlusion = False
 
     def __init__(self, boot_script: str | None = None, parent=None):
         super().__init__(parent)
@@ -175,6 +180,7 @@ class WebHost(QWidget):
             if self._boot_script:
                 log.debug("running boot script")
                 self.run_js(self._boot_script)
+            self.loaded.emit()
         else:
             log.error("content failed to load (%.1f s): %s", elapsed, self._current_url)
             self._show_error()

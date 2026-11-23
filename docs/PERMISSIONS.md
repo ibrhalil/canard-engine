@@ -64,6 +64,7 @@ With WebKit, Canard's pages can be inspected with Safari's Web Inspector on this
 | What | Where |
 |---|---|
 | Sources, active source, boot scripts, menu choices | `~/Library/Application Support/Canard/Canard/settings.json` |
+| Menu bar color: the content frame used as desktop picture while Canard runs, and your picture's path until it is put back | `~/Library/Application Support/Canard/Canard/desktop/`, `settings.json` (`menubar.original_desktop`) |
 | Content data, WebKit (localStorage, IndexedDB, cookies, cache) | `~/Library/WebKit/python/WebsiteDataStore/c4a7d0e2-5b13-4f6a-9e28-7d1b3c6f0a54/` |
 | Content data, Chromium | `~/Library/Application Support/Canard/Canard/webprofile/` |
 | Logs (may contain page addresses and console messages) | `~/Library/Logs/Canard/` |

@@ -11,9 +11,16 @@ from AppKit import (
     NSWindowOcclusionStateVisible,
 )
 from Quartz import (
-    CGWindowListCopyWindowInfo,
+    CGDataProviderCopyData,
+    CGImageGetDataProvider,
+    CGRectNull,
     CGWindowLevelForKey,
+    CGWindowListCopyWindowInfo,
+    CGWindowListCreateImage,
     kCGDesktopIconWindowLevelKey,
+    kCGWindowImageBoundsIgnoreFraming,
+    kCGWindowImageNominalResolution,
+    kCGWindowListOptionIncludingWindow,
     kCGWindowListOptionOnScreenAboveWindow,
 )
 
@@ -85,6 +92,15 @@ def reorder_window(widget) -> None:
     window = _ns_window(widget)
     window.orderOut_(None)
     window.orderFrontRegardless()
+
+
+def window_fingerprint(widget) -> bytes | None:
+    """Pencere sunucusunun bu pencere için gösterdiği görüntüden seyrek piksel örneği (1x çözünürlük, birkaç ms)."""
+    image = CGWindowListCreateImage(CGRectNull, kCGWindowListOptionIncludingWindow, _ns_window(widget).windowNumber(),
+                                    kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution)
+    if image is None:
+        return None
+    return bytes(CGDataProviderCopyData(CGImageGetDataProvider(image)))[::4093]
 
 
 def is_visible(widget) -> bool:

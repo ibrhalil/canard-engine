@@ -51,7 +51,22 @@ class PlatformAdapter:
         """Pencerenin ekrandaki görüntüsünü tazeler (bkz. WallpaperManager._refresh_window)."""
         raise NotImplementedError
 
+    def window_fingerprint(self, widget) -> bytes | None:
+        """Pencerenin ekrandaki görüntüsünden küçük bir örnek: iki örnek aynıysa ekran eski karede takılı."""
+        raise NotImplementedError
+
     def create_video_encoder(self, width: int, height: int, fps: int, bitrate: int, on_output):
+        raise NotImplementedError
+
+    def desktop_picture(self, display_id: int) -> dict | None:
+        """Ekranın masaüstü resmi (settings.json'a yazılabilir sözlük); birebir geri konamayacaksa None."""
+        raise NotImplementedError
+
+    def set_desktop_picture(self, display_id: int, picture: dict) -> None:
+        raise NotImplementedError
+
+    def write_desktop_frame(self, image, path) -> dict:
+        """Kareyi masaüstü resmi olacak dosyaya yazar; set_desktop_picture için sözlük döner."""
         raise NotImplementedError
 
     def app_integration(self):

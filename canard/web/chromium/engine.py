@@ -1,6 +1,7 @@
 """Chromium arka ucu (QtWebEngine): tüm platformlarda."""
 
 import logging
+import signal
 from pathlib import Path
 
 import shiboken6
@@ -92,6 +93,8 @@ class CanardPage(QWebEnginePage):
 
 
 class ChromiumHost(WebHost):
+    refresh_after_occlusion = True  # kısa örtülmeden sonra ekran 30 sn+ donuk kalıyordu (PLAN.md, 2026-11-22)
+
     def __init__(self, profile: QWebEngineProfile, boot_script: str | None = None, audio_hub=None, parent=None):
         super().__init__(boot_script, parent)
         self.view = QWebEngineView()
@@ -167,6 +170,10 @@ class ChromiumHost(WebHost):
         self._loaded(ok, self.page.url().toString())
 
     def _on_render_terminated(self, status=None, exit_code=None, *args) -> None:
+        if getattr(status, "name", "") == "KilledTerminationStatus" and exit_code == signal.SIGTERM:
+            # Canard kapanırken (ya da oturum kapanırken) süreçlere giden olağan sonlandırma; çökme değil.
+            log.debug("page process stopped (SIGTERM): %s", self._current_url)
+            return
         log.error("page process terminated: status=%s, exit code=%s (%s)",
                   getattr(status, "name", status), exit_code, self._current_url)
         self._show_error()
