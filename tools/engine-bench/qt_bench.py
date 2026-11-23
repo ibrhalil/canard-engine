@@ -37,7 +37,17 @@ class _BenchConsole(logging.Handler):
             emit(message.split("[canard-bench] ", 1)[1])
 
 
-def make_profile() -> QWebEngineProfile:
+def _document_script(name: str, source: str) -> QWebEngineScript:
+    script = QWebEngineScript()
+    script.setName(name)
+    script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
+    script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+    script.setRunsOnSubFrames(False)
+    script.setSourceCode(source)
+    return script
+
+
+def make_profile(prelude: str | None = None) -> QWebEngineProfile:
     # canard.web.engine.create_profile ile aynı ayarlar, ayrı depolama.
     profile = QWebEngineProfile("canard-bench")
     profile.setPersistentStoragePath(str(ROOT / "build" / "engine-bench" / "qt-profile"))
@@ -46,13 +56,10 @@ def make_profile() -> QWebEngineProfile:
     settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
     settings.setAttribute(QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, False)
     settings.setAttribute(QWebEngineSettings.WebAttribute.FullScreenSupportEnabled, True)
-    script = QWebEngineScript()
-    script.setName("canard-bench-fps")
-    script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
-    script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-    script.setRunsOnSubFrames(False)
-    script.setSourceCode((HERE / "fps_meter.js").read_text(encoding="utf-8"))
-    profile.scripts().insert(script)
+    profile.scripts().insert(_document_script("canard-bench-fps", (HERE / "fps_meter.js").read_text(encoding="utf-8")))
+    if prelude:
+        # İçerik kodundan önce (ör. mscillus ayarları ve modu; bkz. suite.sh).
+        profile.scripts().insert(_document_script("canard-bench-prelude", prelude))
     return profile
 
 
@@ -104,6 +111,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True)
     parser.add_argument("--boot")
+    parser.add_argument("--prelude", help="belge oluşturulurken, içerikten önce çalışacak JS dosyası")
     parser.add_argument("--keys", type=int, default=0)
     parser.add_argument("--capture", type=int, default=0)
     parser.add_argument("--encode", action="store_true")
@@ -122,7 +130,7 @@ def main() -> int:
     keepalive.timeout.connect(lambda: None)
     keepalive.start(250)
 
-    profile = make_profile()
+    profile = make_profile(Path(args.prelude).read_text(encoding="utf-8") if args.prelude else None)
     audio_hub = None
     if args.system_audio:
         from canard.audio.hub import SystemAudioHub
@@ -142,9 +150,15 @@ def main() -> int:
     layout.setContentsMargins(0, 0, 0, 0)
     layout.addWidget(host)
     QShortcut(QKeySequence(Qt.Key.Key_Escape), window, app.quit)
+    window.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
     window.show()
-    window.raise_()
-    window.activateWindow()
+    # Odak almadan en üstte (WebKitBench ile aynı): kullanıcının klavyesi kıyas sayfasına gitmesin.
+    import objc
+    from AppKit import NSFloatingWindowLevel
+
+    ns_window = objc.objc_object(c_void_p=int(window.winId())).window()
+    ns_window.setLevel_(NSFloatingWindowLevel)
+    ns_window.orderFrontRegardless()
 
     state = {"capture": None}
 

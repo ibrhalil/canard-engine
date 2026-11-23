@@ -15,7 +15,13 @@
     frames++;
     if (delta > worst) worst = delta;
     if (now - start >= 1000) {
-      send('fps=' + (frames * 1000 / (now - start)).toFixed(1) + ' worst_ms=' + worst.toFixed(1));
+      // En büyük tuvalin gerçek piksel boyutu: iki motorun aynı çözünürlükte çizdiğini doğrulamak için.
+      var canvas = '0x0', area = 0;
+      document.querySelectorAll('canvas').forEach(function (c) {
+        if (c.width * c.height > area) { area = c.width * c.height; canvas = c.width + 'x' + c.height; }
+      });
+      send('fps=' + (frames * 1000 / (now - start)).toFixed(1) + ' worst_ms=' + worst.toFixed(1) +
+           ' canvas=' + canvas + ' dpr=' + window.devicePixelRatio + (document.hidden ? ' hidden=1' : ''));
       frames = 0;
       worst = 0;
       start = now;

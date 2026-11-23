@@ -15,6 +15,7 @@ func emit(_ line: String) {
 struct Options {
     var url = ""
     var boot: String?
+    var prelude: String?
     var keys = 0
     var capture = 0
     var encode = false
@@ -25,6 +26,7 @@ struct Options {
             switch argument {
             case "--url": url = iterator.next() ?? ""
             case "--boot": boot = iterator.next().flatMap { try? String(contentsOfFile: $0, encoding: .utf8) }
+            case "--prelude": prelude = iterator.next().flatMap { try? String(contentsOfFile: $0, encoding: .utf8) }
             case "--keys": keys = Int(iterator.next() ?? "") ?? 0
             case "--capture": capture = Int(iterator.next() ?? "") ?? 0
             case "--encode": encode = true
@@ -67,9 +69,13 @@ final class Bench: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.userContentController.addUserScript(
             WKUserScript(source: meter, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        if let prelude = options.prelude {  // içerik kodundan önce (ör. mscillus ayarları ve modu; bkz. suite.sh)
+            configuration.userContentController.addUserScript(
+                WKUserScript(source: prelude, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
         configuration.userContentController.add(self, name: "bench")
 
-        let frame = NSScreen.main!.frame
+        let frame = NSScreen.screens[0].frame  // menü çubuklu ekran (NSScreen.main odaklı pencerenin ekranıdır)
         window = BenchWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.title = "Canard motor kıyası — WebKit"
         webView = WKWebView(frame: NSRect(origin: .zero, size: frame.size), configuration: configuration)
@@ -77,8 +83,10 @@ final class Bench: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         webView.uiDelegate = self
         webView.autoresizingMask = [.width, .height]
         window.contentView = webView
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        // Odak almadan en üstte: kıyas sırasında başka ekranda çalışan kullanıcının klavyesi buraya gelmesin
+        // (mscillus harfleri mod kısayolu sayar). Esc yalnız pencereye tıklanınca çalışır.
+        window.level = .floating
+        window.orderFrontRegardless()
         webView.load(URLRequest(url: URL(string: options.url)!))
     }
 

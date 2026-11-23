@@ -1,11 +1,13 @@
-"""Motor kıyası: aynı içeriği QtWebEngine (bugünkü Canard) ve Swift + WKWebView ile aynı koşulda ölçer.
+"""Motor kıyası: aynı içeriği QtWebEngine (bugünkü Canard), Swift + WKWebView ve PyObjC + WKWebView
+(tools/webkit-wallpaper/spike.py, `wkpy`) ile aynı koşulda ölçer.
 
 Her çalıştırma içeriği ana ekranı kaplayan pencerede açar, ısınma süresinden sonra ölçer, kapatır ve sonucu
 build/engine-bench/results.jsonl dosyasına ekler. Ölçülenler:
   - kare hızı: sayfanın requestAnimationFrame hızı (ort., en düşük %5, en uzun kare)
   - CPU: motorun tüm süreçlerinin (Qt: alt süreçler; WebKit: uygulamaya bağlı XPC süreçleri) harcadığı çekirdek
   - bellek: aynı süreçlerin toplam RSS'i (ort., tepe)
-  - GPU: sistem geneli "Device Utilization %" (Canard kapalı olmalı; `idle` ile taban ölçülür)
+  - GPU: sistem geneli "Device Utilization %" ve GPU gücü W (IOReport, sudo'suz; Canard kapalı olmalı, `idle` taban)
+  - WindowServer CPU'su (ekrana bileşimin bedeli) ve macOS ısı durumu (fansız Mac'te yavaşlatma sinyali)
   - --capture: Canard.saver hattı (kare yakala → BGRA, --encode ile donanım HEVC) kare başına süre
 
 Örnekler (proje klasöründe):
@@ -13,6 +15,8 @@ build/engine-bench/results.jsonl dosyasına ekler. Ölçülenler:
   uv run python tools/engine-bench/run.py idle                       # taban (GPU/CPU boşta)
   uv run python tools/engine-bench/run.py qt --label mod3 --keys 3
   uv run python tools/engine-bench/run.py webkit --label mod3 --keys 3
+  uv run python tools/engine-bench/run.py wkpy --label mod3 --keys 3              # PyObjC, tam ekran
+  uv run python tools/engine-bench/run.py wkpy --wallpaper --boot system --label duvar
   uv run python tools/engine-bench/run.py qt --label mod3-yayın --keys 3 --capture 30 --encode
   uv run python tools/engine-bench/run.py compare                    # tüm sonuçlar tablo hâlinde
 
@@ -33,6 +37,8 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+
+import power
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -71,7 +77,7 @@ def _processes() -> dict[int, tuple[int, float, int, str]]:
     return table
 
 
-def _engine_pids(root: int, table: dict) -> set[int]:
+def _engine_pids(root: int, table: dict, before: set[int] = frozenset()) -> set[int]:
     children: dict[int, list[int]] = {}
     for pid, (ppid, *_rest) in table.items():
         children.setdefault(ppid, []).append(pid)
@@ -81,9 +87,15 @@ def _engine_pids(root: int, table: dict) -> set[int]:
         if pid in table and pid not in found:
             found.add(pid)
             stack.extend(children.get(pid, []))
-    # WebKit süreçleri (WebContent, GPU, Networking) launchd'nin çocuğu; sorumlu süreç olarak uygulamaya bağlılar.
-    for pid in table:
-        if pid not in found and _responsible(pid) == root:
+    # WebKit süreçleri (WebContent, GPU, Networking) launchd'nin çocuğu. Uygulama terminalden başlatılınca sorumlu
+    # süreç uygulama değil terminal olur (TCC gibi); bu yüzden ölçüm başladıktan sonra doğan, sorumlusu uygulama ya da
+    # uygulamanın sorumlusu olan WebKit süreçleri de sayılır.
+    owners = {root, _responsible(root)}
+    for pid, (_ppid, _cpu, _rss, comm) in table.items():
+        if pid in found:
+            continue
+        if _responsible(pid) == root or (pid not in before and "com.apple.WebKit." in comm
+                                         and _responsible(pid) in owners):
             found.add(pid)
     return found
 
@@ -104,6 +116,11 @@ def _command(args) -> list[str]:
         command = [sys.executable, str(HERE / "qt_bench.py")]
         if args.boot == "system":
             command.append("--system-audio")
+    elif args.engine == "wkpy":
+        command = [sys.executable, str(ROOT / "tools" / "webkit-wallpaper" / "spike.py"),
+                   "--window", "wallpaper" if args.wallpaper else "fullscreen"]
+        if args.capture:
+            sys.exit("wkpy: kare yakalama (--capture) bu denemede yok")
     else:
         if not WEBKIT_APP.exists():
             sys.exit("WebKit tarafı derlenmemiş: tools/engine-bench/build.sh")
@@ -114,6 +131,10 @@ def _command(args) -> list[str]:
     boot = BOOTS.get(args.boot, Path(args.boot) if args.boot != "none" else None)
     if boot is not None:
         command += ["--boot", str(boot)]
+    elif args.engine == "wkpy":
+        command += ["--boot", "none"]  # spike.py'nin varsayılanı system
+    if args.prelude:
+        command += ["--prelude", str(Path(args.prelude).resolve())]
     if args.capture:
         command += ["--capture", str(args.capture)]
         if args.encode:
@@ -125,6 +146,7 @@ def measure(args) -> dict:
     process = None
     lines: list[tuple[float, str]] = []
     ready = threading.Event()
+    before = set(_processes())
     if args.engine != "idle":
         env = dict(os.environ, PYTHONPATH=str(ROOT), NO_COLOR="1")
         process = subprocess.Popen(_command(args), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
@@ -148,21 +170,29 @@ def measure(args) -> dict:
     start = time.monotonic()
     first = _processes()
     gpu, rss = [], []
+    energy = power.GpuEnergy()
+    energy_start = energy.read()
+    thermal = [power.thermal_state()]
     while time.monotonic() - start < args.duration:
         if process is not None and process.poll() is not None:
             break  # Esc
         time.sleep(1)
+        thermal.append(power.thermal_state())
         value = _gpu_utilization()
         if value is not None:
             gpu.append(value)
         if root is not None:
             table = _processes()
-            rss.append(sum(table[pid][2] for pid in _engine_pids(root, table)) / 1024)
+            rss.append(sum(table[pid][2] for pid in _engine_pids(root, table, before)) / 1024)
     elapsed = time.monotonic() - start
+    energy_end = energy.read()
     last = _processes()
-    cpu = None
+    server = [pid for pid, row in last.items() if row[3].endswith("/WindowServer") and pid in first]
+    server_cpu = (sum(last[pid][1] - first[pid][1] for pid in server) / elapsed * 100) if server else None
+    gpu_w = (energy_end - energy_start) / elapsed if energy_start is not None and energy_end is not None else None
+    cpu, pids = None, set()
     if root is not None:
-        pids = _engine_pids(root, last)
+        pids = _engine_pids(root, last, before)
         used = sum(last[pid][1] - (first[pid][1] if pid in first and first[pid][3] == last[pid][3] else 0)
                    for pid in pids)
         cpu = used / elapsed * 100
@@ -176,6 +206,9 @@ def measure(args) -> dict:
     window = [line for at, line in lines if start <= at <= start + elapsed]
     fps = [float(m.group(1)) for line in window if (m := re.match(r"fps=([\d.]+)", line))]
     worst = [float(m.group(1)) for line in window if (m := re.search(r"worst_ms=([\d.]+)", line))]
+    canvas = [m.group(1) for line in window if (m := re.search(r"canvas=(\d+x\d+) dpr=([\d.]+)", line))]
+    hidden = sum(1 for line in window if line.startswith("fps=") and "hidden=1" in line)
+    modes = [m.group(1) for line in window if (m := re.match(r"mode=(\S+)", line))]
     capture = [float(m.group(1)) for line in window if (m := re.match(r"capture_ms=([\d.]+)", line))]
     captured = [int(m.group(1)) for line in window if (m := re.search(r"frames=(\d+)", line))]
     skipped = [int(m.group(1)) for line in window if (m := re.search(r"skipped=(\d+)", line))]
@@ -184,12 +217,18 @@ def measure(args) -> dict:
         "time": datetime.now().isoformat(timespec="seconds"),
         "engine": args.engine,
         "label": args.label,
+        "wallpaper": bool(getattr(args, "wallpaper", False)),
         "url": args.url if process else None,
         "boot": args.boot if process else None,
         "keys": args.keys,
         "capture": args.capture or None,
         "encode": bool(args.capture and args.encode),
         "seconds": round(elapsed, 1),
+        "fps_series": fps,
+        "canvas": max(set(canvas), key=canvas.count) if canvas else None,
+        "mode": max(set(modes), key=modes.count) if modes else None,
+        "hidden_s": hidden,
+        "engine_procs": sorted({last[pid][3].rsplit("/", 1)[-1] for pid in pids}) if root is not None else None,
         "fps_avg": round(statistics.mean(fps), 1) if fps else None,
         "fps_low5": round(statistics.mean(low), 1) if low else None,
         "worst_frame_ms": round(max(worst), 1) if worst else None,
@@ -197,21 +236,27 @@ def measure(args) -> dict:
         "rss_mb_avg": round(statistics.mean(rss)) if rss else None,
         "rss_mb_peak": round(max(rss)) if rss else None,
         "gpu_pct": round(statistics.mean(gpu), 1) if gpu else None,
+        "gpu_w": round(gpu_w, 2) if gpu_w is not None else None,
+        "windowserver_cpu_pct": round(server_cpu, 1) if server_cpu is not None else None,
+        "thermal_max": max(thermal),
         "capture_ms": round(statistics.mean(capture), 1) if capture else None,
         "captured_fps": round(statistics.mean(captured), 1) if captured else None,
         "skipped_per_s": round(statistics.mean(skipped), 1) if skipped else None,
     }
 
 
-_COLUMNS = [("engine", "motor"), ("label", "etiket"), ("capture", "yayın"), ("fps_avg", "kare/sn"),
+_COLUMNS = [("engine", "motor"), ("label", "etiket"), ("mode", "gerçek mod"), ("capture", "yayın"), ("fps_avg", "kare/sn"),
             ("fps_low5", "en düşük %5"), ("worst_frame_ms", "en uzun kare ms"), ("cpu_pct", "CPU %"),
             ("rss_mb_avg", "bellek MB"), ("rss_mb_peak", "tepe MB"), ("gpu_pct", "GPU %"),
+            ("gpu_w", "GPU W"), ("windowserver_cpu_pct", "WS CPU %"), ("thermal_max", "ısı"),
             ("capture_ms", "yakala ms"), ("captured_fps", "yakalanan kare/sn")]
 
 
 def _table(rows: list[dict]) -> str:
     def cell(row, key):
         value = row.get(key)
+        if key == "thermal_max":
+            return power.thermal_name(value)
         if key == "capture" and value:
             return f"{value}{'+hevc' if row.get('encode') else ''}"
         return "–" if value in (None, "") else str(value)
@@ -226,15 +271,17 @@ def _table(rows: list[dict]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("engine", choices=["qt", "webkit", "idle", "compare"])
+    parser.add_argument("engine", choices=["qt", "webkit", "wkpy", "idle", "compare"])
     parser.add_argument("--url", default=DEFAULT_URL)
     parser.add_argument("--boot", default="mic", help="mic (varsayılan) · system (yalnız qt) · none · JS dosyası")
+    parser.add_argument("--prelude", help="belge oluşturulurken, içerikten önce çalışacak JS (ör. ayarlar, mod)")
     parser.add_argument("--keys", type=int, default=0, help="yüklenince içeriğe kaç kez → gönderilsin (mscillus modu)")
     parser.add_argument("--capture", type=int, default=0, metavar="FPS", help="Canard.saver hattını da çalıştır")
     parser.add_argument("--encode", action="store_true", help="--capture ile donanım HEVC kodlaması da")
     parser.add_argument("--warmup", type=float, default=15)
     parser.add_argument("--duration", type=float, default=30)
     parser.add_argument("--label", default="")
+    parser.add_argument("--wallpaper", action="store_true", help="wkpy: tam ekran yerine duvar kağıdı penceresi")
     parser.add_argument("--force", action="store_true", help="Canard açıkken de ölç (sonuçlar kirlenir)")
     args = parser.parse_args()
 
@@ -253,6 +300,9 @@ def main() -> int:
     with RESULTS.open("a", encoding="utf-8") as f:
         f.write(json.dumps(result, ensure_ascii=False) + "\n")
     print(_table([result]))
+    if result["engine_procs"]:
+        print("ölçülen süreçler: " + ", ".join(result["engine_procs"]))
+        print(f"tuval: {result['canvas']} · sayfa gizli: {result['hidden_s']} sn")
     return 0
 
 
