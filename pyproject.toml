@@ -31,5 +31,6 @@ canard = ["web/*.js", "resources/*.svg"]
 
 [dependency-groups]
 dev = [
+    "pyobjc-framework-webkit>=10 ; sys_platform == 'darwin'",
     "pytest>=9.2.0",
 ]
