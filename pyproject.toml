@@ -17,6 +17,7 @@ dependencies = [
     "pyobjc-framework-quartz>=10 ; sys_platform == 'darwin'",
     "pyobjc-framework-screencapturekit>=10 ; sys_platform == 'darwin'",
     "pyobjc-framework-videotoolbox>=10 ; sys_platform == 'darwin'",
+    "pyobjc-framework-webkit>=10 ; sys_platform == 'darwin'",
     "PySide6>=6.9,<7",
 ]
 
@@ -27,10 +28,9 @@ canard = "canard.app.main:main"
 include = ["canard*"]
 
 [tool.setuptools.package-data]
-canard = ["web/*.js", "resources/*.svg"]
+canard = ["web/*/*.js", "resources/*.svg"]
 
 [dependency-groups]
 dev = [
-    "pyobjc-framework-webkit>=10 ; sys_platform == 'darwin'",
     "pytest>=9.2.0",
 ]

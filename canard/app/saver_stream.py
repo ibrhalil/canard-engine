@@ -18,11 +18,10 @@ import json
 import logging
 import struct
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtGui import QImage
 from PySide6.QtNetwork import QHostAddress, QTcpServer
-from PySide6.QtQuickWidgets import QQuickWidget
 
 from canard.i18n import t
 
@@ -33,6 +32,7 @@ DEFAULT_FPS = 30  # 30, 60/120 Hz ekranlara eşit bölünür; yetişilemezse zam
 _BITS_PER_PIXEL_FRAME = 0.12  # HEVC için cömert bit bütçesi (ör. 3420×2224 @24 ≈ 22 Mbit/sn)
 _MAX_PENDING_BYTES = 8 * 1024 * 1024  # .saver yetişemiyorsa kare atlanır, gecikme birikmez
 _MAX_HANDSHAKE = 4096
+_GRAB_TIMEOUT_S = 1.0
 
 
 def _packet(kind: bytes, payload: bytes) -> bytes:
@@ -55,8 +55,11 @@ class DisplayStream(QObject):
         self._frames = 0
         self._dropped = 0
         self._capture_ms = 0.0
-        # grabFramebuffer() GPU tamponunu doğrudan verir; QWidget.grab()'dan ~2 kat hızlı.
-        self._quick = host.view.findChild(QQuickWidget)
+        self._grabbing: float | None = None  # bekleyen yakalamanın başlangıcı
+        self._encoding = False  # kodlama iş parçacığı önceki kareyle meşgul
+        # Kareyi okuyup kodlamak ana iş parçacığında sayfanın kendi çizimini yavaşlatıyordu (3420×2224 ~13 ms/kare);
+        # ana iş parçacığında yalnız yakalama kalır.
+        self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="canard-encode")
         self.bitrate = int(width * height * fps * _BITS_PER_PIXEL_FRAME)
         self._encoder = adapter.create_video_encoder(width, height, fps, self.bitrate, self._on_output)
         self._encoded.connect(self._deliver)
@@ -84,22 +87,36 @@ class DisplayStream(QObject):
 
     def _capture(self) -> None:
         # Kare tek kodlandığı için en yavaş bağlantı belirler (atlanan P-karesi kod çözmeyi bozar).
-        if any(session.backlogged for session in self._sessions):
+        started = time.perf_counter()
+        # Önceki kare hâlâ bekleniyorsa atlanır; yanıt hiç gelmezse (ör. sayfa yeniden yüklendi) 1 sn sonra bırakılır.
+        waiting = self._grabbing is not None and started - self._grabbing < _GRAB_TIMEOUT_S
+        if waiting or self._encoding or any(session.backlogged for session in self._sessions):
             self._dropped += 1
             return
-        started = time.perf_counter()
+        self._grabbing = started
         pts_us = time.monotonic_ns() // 1000
-        image = self._quick.grabFramebuffer() if self._quick is not None else self.host.view.grab().toImage()
-        if image.isNull():
+        # Chromium kareyi hemen verir, WebKit hemen ya da sonra (ana iş parçacığında); o arada yeni yakalama başlamaz.
+        self.host.grab_frame(self.width, self.height, lambda image: self._encode(image, pts_us, started))
+
+    def _encode(self, image, pts_us: int, started: float) -> None:
+        if self._grabbing != started:
+            return  # zaman aşımından sonra gelen eski kare (zaman damgası sırası bozulmasın)
+        self._grabbing = None
+        if image is None or self._encoder is None:
             return
-        if image.format() != QImage.Format.Format_ARGB32:
-            image = image.convertToFormat(QImage.Format.Format_ARGB32)  # bellekte BGRA (CoreVideo RGBA desteklemiyor)
-        if image.width() != self.width or image.height() != self.height:
-            image = image.scaled(self.width, self.height)  # yalnız istisna (ör. etkileşimli boşluk)
         force, self._force_keyframe = self._force_keyframe, False
-        self._encoder.encode(image, pts_us, force_keyframe=force)
-        self._frames += 1
-        self._capture_ms += (time.perf_counter() - started) * 1000
+        self._encoding = True
+        self._worker.submit(self._encode_frame, self._encoder, image, pts_us, force, started)
+
+    def _encode_frame(self, encoder, image, pts_us: int, force: bool, started: float) -> None:
+        try:
+            encoder.encode(image, pts_us, force_keyframe=force)
+            self._frames += 1
+            self._capture_ms += (time.perf_counter() - started) * 1000
+        except Exception:
+            log.exception("frame could not be encoded")
+        finally:
+            self._encoding = False
 
     def _on_output(self, keyframe: bool, pts_us: int, hvcc: bytes | None, data: bytes) -> None:
         self._encoded.emit(keyframe, pts_us, hvcc, data)
@@ -119,6 +136,7 @@ class DisplayStream(QObject):
     def close(self) -> None:
         self._timer.stop()
         self._stats.stop()
+        self._worker.shutdown(wait=True)  # kodlayıcı, iş parçacığı onu kullanırken kapanmasın
         if self._encoder is not None:
             self._encoder.close()
             self._encoder = None
@@ -238,9 +256,13 @@ class SaverStreamServer(QObject):
             return
         self._enabled = enabled
         if not enabled:
-            for session in list(self._sessions):
-                session.close()  # Canard.saver yeniden bağlanınca nedeni öğrenir
+            self.drop_sessions()  # Canard.saver yeniden bağlanınca nedeni öğrenir
         log.info("screensaver stream %s", "on" if enabled else "off")
+
+    def drop_sessions(self) -> None:
+        """Bağlı Canard.saver'lar kapatılır (ör. motor değişirken); kısa süre sonra yeniden bağlanırlar."""
+        for session in list(self._sessions):
+            session.close()
 
     def set_fps(self, fps: int) -> None:
         """Yeni yayınlarda geçerli (süren yayın kendi hızıyla devam eder)."""

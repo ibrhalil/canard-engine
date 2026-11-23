@@ -1,6 +1,6 @@
 # Canard
 
-Canard runs any web content — a remote site, a local production build or a dev server — as a **live desktop wallpaper** and a **real screensaver**. One Python core (PySide6 + Qt WebEngine) with thin per-OS adapters.
+Canard runs any web content — a remote site, a local production build or a dev server — as a **live desktop wallpaper** and a **real screensaver**. One Python core (PySide6) with thin per-OS adapters; on macOS the page is drawn by WebKit (the system engine, default) or Chromium (Qt WebEngine), elsewhere by Chromium.
 
 - **Live wallpaper** behind the desktop icons, one page per screen, paused automatically when covered.
 - **Real macOS screensaver** (`Canard.saver`) that keeps showing the live page on the lock screen.

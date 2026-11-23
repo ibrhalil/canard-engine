@@ -38,6 +38,23 @@ _cf.CFStringCreateWithCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctyp
 _cf.CFNumberCreate.restype = ctypes.c_void_p
 _cf.CFNumberCreate.argtypes = [ctypes.c_void_p, ctypes.c_long, ctypes.c_void_p]
 _cf.CFRelease.argtypes = [ctypes.c_void_p]
+_cg = ctypes.CDLL(ctypes.util.find_library("CoreGraphics"))
+
+
+class _CGRect(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double), ("width", ctypes.c_double),
+                ("height", ctypes.c_double)]
+
+
+_cg.CGBitmapContextCreate.restype = ctypes.c_void_p
+_cg.CGBitmapContextCreate.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_size_t,
+                                      ctypes.c_size_t, ctypes.c_void_p, ctypes.c_uint32]
+_cg.CGContextSetBlendMode.argtypes = [ctypes.c_void_p, ctypes.c_int32]
+_cg.CGContextDrawImage.argtypes = [ctypes.c_void_p, _CGRect, ctypes.c_void_p]
+_cg.CGContextRelease.argtypes = [ctypes.c_void_p]
+_BGRA_PREMULTIPLIED = Quartz.kCGImageAlphaPremultipliedFirst | Quartz.kCGBitmapByteOrder32Little
+_BLEND_COPY = 17  # kCGBlendModeCopy: saydam pikseller tampondaki eskiyle karışmasın
+_SRGB = Quartz.CGColorSpaceCreateWithName(Quartz.kCGColorSpaceSRGB)
 _CF_TRUE = ctypes.c_void_p.in_dll(_cf, "kCFBooleanTrue").value
 _CF_FALSE = ctypes.c_void_p.in_dll(_cf, "kCFBooleanFalse").value
 _UTF8 = 0x08000100
@@ -75,7 +92,8 @@ def _set(session_ptr: int, key, value) -> int:
 
 
 class HevcEncoder:
-    """BGRA QImage'ları donanım HEVC'ye kodlar; her kare için `on_output(keyframe, pts_us, hvcc, data)` çağrılır.
+    """QImage (BGRA) ya da CGImage karelerini donanım HEVC'ye kodlar; her kare için
+    `on_output(keyframe, pts_us, hvcc, data)` çağrılır.
 
     `on_output` VideoToolbox iş parçacığında çalışır. `pts_us` karenin yakalanma anıdır (mikrosaniye; .saver
     kareleri buna göre eşit aralıkla gösterir). `hvcc` yalnız anahtar karelerde dolu (kod çözücü parametre
@@ -103,7 +121,12 @@ class HevcEncoder:
         self._handler = self._done
 
     def encode(self, image, pts_us: int, force_keyframe: bool = False) -> None:
-        """image: QImage, Format_ARGB32 (bellekte BGRA), kodlayıcı boyutunda; pts_us: yakalanma anı (µs)."""
+        """image: Format_ARGB32 QImage (bellekte BGRA, kodlayıcı boyutunda; Chromium) ya da CGImage (herhangi bir
+        boyutta, kodlayıcı boyutuna ölçeklenir; WebKit). pts_us: yakalanma anı (µs)."""
+        with objc.autorelease_pool():  # Canard'ın kodlama iş parçacığında çağrılır; orada otomatik havuz yok
+            self._encode_now(image, pts_us, force_keyframe)
+
+    def _encode_now(self, image, pts_us: int, force_keyframe: bool) -> None:
         status, pixel_buffer = Quartz.CVPixelBufferCreate(None, self.width, self.height,
                                                           Quartz.kCVPixelFormatType_32BGRA, None, None)
         if status != 0:
@@ -113,18 +136,41 @@ class HevcEncoder:
         _cv.CVPixelBufferLockBaseAddress(ptr, 0)
         try:
             base, row = _cv.CVPixelBufferGetBaseAddress(ptr), _cv.CVPixelBufferGetBytesPerRow(ptr)
-            src = ctypes.addressof((ctypes.c_char * image.sizeInBytes()).from_buffer(image.bits()))
-            line = image.bytesPerLine()
-            if row == line:
-                ctypes.memmove(base, src, image.sizeInBytes())
+            if hasattr(image, "bits"):
+                self._copy_qimage(image, base, row)
             else:
-                width = min(line, row)
-                for y in range(self.height):
-                    ctypes.memmove(base + y * row, src + y * line, width)
+                self._draw_cgimage(image, base, row)
         finally:
             _cv.CVPixelBufferUnlockBaseAddress(ptr, 0)
         _encode(self._session, pixel_buffer, _make_time(pts_us, _MICROS), _make_time(_MICROS // self.fps, _MICROS),
                 _FORCE_KEYFRAME if force_keyframe else None, None, self._handler)
+
+    def _copy_qimage(self, image, base: int, row: int) -> None:
+        src = ctypes.addressof((ctypes.c_char * image.sizeInBytes()).from_buffer(image.bits()))
+        line = image.bytesPerLine()
+        if row == line:
+            ctypes.memmove(base, src, image.sizeInBytes())
+        else:
+            width = min(line, row)
+            for y in range(self.height):
+                ctypes.memmove(base + y * row, src + y * line, width)
+
+    def _draw_cgimage(self, image, base: int, row: int) -> None:
+        # Görüntünün kendi renk uzayıyla çizilir: renk dönüşümü yok (Chromium yolu da baytları olduğu gibi kopyalar).
+        space = Quartz.CGImageGetColorSpace(image) or _SRGB
+        context = _cg.CGBitmapContextCreate(base, self.width, self.height, 8, row, objc.pyobjc_id(space),
+                                            _BGRA_PREMULTIPLIED)
+        if not context:  # desteklenmeyen renk uzayı
+            context = _cg.CGBitmapContextCreate(base, self.width, self.height, 8, row, objc.pyobjc_id(_SRGB),
+                                                _BGRA_PREMULTIPLIED)
+        if not context:
+            log.warning("CGBitmapContextCreate failed")
+            return
+        try:
+            _cg.CGContextSetBlendMode(context, _BLEND_COPY)
+            _cg.CGContextDrawImage(context, _CGRect(0, 0, self.width, self.height), objc.pyobjc_id(image))
+        finally:
+            _cg.CGContextRelease(context)
 
     def close(self) -> None:
         if self._ptr:

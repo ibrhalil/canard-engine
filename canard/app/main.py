@@ -12,6 +12,7 @@ from canard.app.application import LANGUAGE_KEY, CanardApp
 from canard.app.settings import SettingsStore, default_settings_path
 from canard.content.sources import SourceError, from_build, from_url, validate
 from canard.i18n import t
+from canard.web import ENGINE_KEY, available_engines, default_engine, resolve_engine
 
 log = logging.getLogger("canard")
 
@@ -31,6 +32,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--interactive", action="store_true", help=t("Wallpaper receives mouse input (interactive mode)"))
     parser.add_argument("--boot-file", help=t("JS file to run when the page loads (boot script)"))
     parser.add_argument("--clear-boot", action="store_true", help=t("Remove the boot script of the source"))
+    parser.add_argument("--engine", choices=available_engines(),
+                        help=t("Web engine for this run (default: menu setting, otherwise {default}); content data "
+                               "is kept separately per engine", default=default_engine()))
     parser.add_argument("--no-system-audio", action="store_true",
                         help=t("Do not give system audio to the content (disables the getDisplayMedia audio bridge)"))
     parser.add_argument("--screensaver-after", type=float, metavar=t("MIN"),
@@ -98,7 +102,7 @@ def _acquire_instance_lock():
     # İkinci örnek web profilinin kilidini alamaz (localStorage yalnız bellekte kalır), kısayollar da çakışır.
     from PySide6.QtCore import QLockFile
 
-    from canard.web.engine import data_location
+    from canard.app.settings import data_location
 
     directory = data_location()
     directory.mkdir(parents=True, exist_ok=True)
@@ -140,7 +144,7 @@ def main(argv=None) -> int:
         conflicting = [flag for flag, given in (
             ("--mode", args.mode), ("--interactive", args.interactive), ("--no-system-audio", args.no_system_audio),
             ("--screensaver-after", args.screensaver_after is not None), ("--no-saver-stream", args.no_saver_stream),
-            ("--saver-fps", args.saver_fps is not None)) if given]
+            ("--saver-fps", args.saver_fps is not None), ("--engine", args.engine)) if given]
         if conflicting:
             log.error("%s", t("{flags} cannot be used with --tray: these settings are made in the menu and remembered",
                                 flags=", ".join(conflicting)))
@@ -162,6 +166,7 @@ def main(argv=None) -> int:
         return 1
 
     app = CanardApp(args.settings)
+    args.engine = args.engine or resolve_engine(app.store.get(ENGINE_KEY))
     log.debug("Canard %s · Python %s · language %s · settings: %s", canard.__version__, sys.version.split()[0],
               i18n.language, app.settings_path)
 
@@ -216,7 +221,7 @@ def _run(app: CanardApp, instance_lock, source, args, mode: str) -> int:
     try:
         return app.run(source, mode=mode, interactive=args.interactive, system_audio=not args.no_system_audio,
                        screensaver_after=args.screensaver_after, saver_stream=not args.no_saver_stream,
-                       saver_fps=args.saver_fps, tray=args.tray)
+                       saver_fps=args.saver_fps, tray=args.tray, engine=args.engine)
     finally:
         instance_lock.unlock()
 

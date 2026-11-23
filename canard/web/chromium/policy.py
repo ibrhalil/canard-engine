@@ -2,6 +2,8 @@ import logging
 
 from PySide6.QtWebEngineCore import QWebEnginePermission
 
+from canard.web.base import notify_media_request
+
 log = logging.getLogger("canard.web")
 
 _ALLOWED = {
@@ -12,7 +14,6 @@ _ALLOWED = {
     QWebEnginePermission.PermissionType.DesktopAudioVideoCapture,
 }
 
-media_listeners: list = []  # sayfa mikrofon isteyince çağrılır (Runtime: OS izni kapalıysa kullanıcıya söyler)
 _MICROPHONE = {
     QWebEnginePermission.PermissionType.MediaAudioCapture,
     QWebEnginePermission.PermissionType.MediaAudioVideoCapture,
@@ -22,8 +23,7 @@ _MICROPHONE = {
 def decide(permission) -> None:
     kind = permission.permissionType()
     if kind in _MICROPHONE:
-        for listener in media_listeners:
-            listener("microphone")
+        notify_media_request("microphone")
     origin = permission.origin().toString()
     if kind in _ALLOWED:
         log.debug("permission granted: %s (%s)", kind.name, origin)

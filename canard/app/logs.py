@@ -24,7 +24,7 @@ _file_stream = None
 def default_log_path() -> Path:
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Logs" / "Canard" / "canard.log"
-    from canard.web.engine import data_location
+    from canard.app.settings import data_location
 
     return data_location() / "canard.log"
 

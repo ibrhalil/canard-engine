@@ -25,7 +25,7 @@ An ad-hoc signed Canard.app may be asked again after each rebuild; signing with 
 | Camera | Only if content asks for the camera | Privacy & Security › Camera |
 | Accessibility | **Not needed** — shortcuts use Carbon hotkeys; the keyboard is not monitored | — |
 
-If a permission was denied, Canard shows a one-time dialog with **Open Settings**, the menu's status line shows "⚠︎ permission needed", and **Permissions ▸** lists each state. Restart Canard after changing a permission.
+If a permission was denied, Canard shows a one-time dialog with **Open Settings**, the menu's status line shows "⚠︎ permission needed", and **Settings ▸ Permissions ▸** lists each state. Restart Canard after changing a permission.
 
 Audio capture runs only while a visible page uses it; it stops when the content stops, the wallpaper is covered or Canard quits. macOS may show a recording indicator meanwhile.
 
@@ -37,19 +37,21 @@ tccutil reset All dev.canard.app
 
 ## What content may access
 
-To start on its own as a wallpaper, content gets permissive defaults (`canard/web/policy.py`):
+To start on its own as a wallpaper, content gets permissive defaults, the same with both engines (`canard/web/chromium/policy.py`, `canard/web/webkit/engine.py`):
 
 | Web permission | Decision |
 |---|---|
 | Microphone, camera | Allowed |
-| Screen sharing (`getDisplayMedia`) | Allowed, first screen picked automatically |
+| Screen sharing (`getDisplayMedia`) | Chromium: allowed, first screen picked automatically. WebKit: macOS shows its screen sharing picker |
 | System audio (`getDisplayMedia({audio: true})`) | Canard's captured system audio (off with `--no-system-audio` or the menu) |
 | Notifications, location, clipboard, others | Denied |
 | Autoplay | Allowed without a user gesture |
 
 > ⚠️ A source you add can listen to the microphone and system audio without asking. Per-source permissions are planned.
 
-System audio reaches the page through Qt's in-process bridge (QWebChannel): no network port, no other app or browser tab can read it.
+System audio reaches the page through the engine's in-process bridge (Chromium: QWebChannel; WebKit: script messages): no network port, no other app or browser tab can read it.
+
+With WebKit, Canard's pages can be inspected with Safari's Web Inspector on this Mac (Develop menu); nothing is exposed over the network.
 
 ## Network
 
@@ -62,7 +64,8 @@ System audio reaches the page through Qt's in-process bridge (QWebChannel): no n
 | What | Where |
 |---|---|
 | Sources, active source, boot scripts, menu choices | `~/Library/Application Support/Canard/Canard/settings.json` |
-| Content data (localStorage, IndexedDB, cookies, cache) | `~/Library/Application Support/Canard/Canard/webprofile/` |
+| Content data, WebKit (localStorage, IndexedDB, cookies, cache) | `~/Library/WebKit/python/WebsiteDataStore/c4a7d0e2-5b13-4f6a-9e28-7d1b3c6f0a54/` |
+| Content data, Chromium | `~/Library/Application Support/Canard/Canard/webprofile/` |
 | Logs (may contain page addresses and console messages) | `~/Library/Logs/Canard/` |
 
-All sources share one web profile; data is separated per site address (origin). Removing a source does not delete its data. The About window links to these folders. To delete everything, quit Canard and run `rm -rf ~/Library/Application\ Support/Canard`.
+All sources share one web profile per engine; data is separated per site address (origin), and the two engines never share data. Removing a source does not delete its data. The About window links to the current engine's folder. The WebKit folder is named after the process (`python` while Canard runs from the project's environment) and managed by macOS' WebKit. To delete everything, quit Canard and run `rm -rf ~/Library/Application\ Support/Canard ~/Library/WebKit/python/WebsiteDataStore/c4a7d0e2-5b13-4f6a-9e28-7d1b3c6f0a54`.

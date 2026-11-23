@@ -7,7 +7,7 @@ import platform
 from pathlib import Path
 
 from PySide6.QtCore import QKeyCombination, QObject, QPointF, QRectF, Qt, QUrl, qVersion
-from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMenu, QMessageBox, QSystemTrayIcon
 
 import canard
@@ -17,7 +17,7 @@ from canard.app.application import LANGUAGE_KEY
 from canard.content.sources import BUILD, DEVSERVER, REMOTE, SourceError, from_build, from_url, validate
 from canard.i18n import N_, t
 from canard.platform.base import detect
-from canard.web.engine import web_data_location
+from canard.web import ENGINE_KEY, LABELS, WEBKIT, available_engines
 
 log = logging.getLogger("canard.tray")
 
@@ -29,9 +29,10 @@ _DEFAULTS = {
     "saver.fps": 30,
     "tray.disabled_screens": [],
 }
-_FPS_CHOICES = (24, 30)
+_FPS_CHOICES = (24, 30, 60)
 _TYPE_LABELS = {BUILD: N_("local build"), REMOTE: N_("remote"), DEVSERVER: N_("dev server")}
 _TOOLS = Path(canard.__file__).resolve().parents[1] / "tools"
+_ENGINE_HINTS = {WEBKIT: N_("system engine, uses less power")}
 _PRESET_LABELS = {"mscillus-boot-system.js": N_("mscillus: system audio"),
                   "mscillus-boot-mic.js": N_("mscillus: microphone")}
 _ARROWS = {"←": Qt.Key.Key_Left, "→": Qt.Key.Key_Right}
@@ -98,6 +99,14 @@ def _clear(menu: QMenu) -> None:
         action.deleteLater()
 
 
+def _remove(menu: QMenu, actions: list) -> None:
+    """Menünün bir bölümünü (yeniden kurulan öğeler) siler; silme _clear'daki gibi ertelenir."""
+    for action in actions:
+        menu.removeAction(action)
+        action.deleteLater()
+    actions.clear()
+
+
 def _type_label(kind: str) -> str:
     return t(_TYPE_LABELS[kind]) if kind in _TYPE_LABELS else kind
 
@@ -150,16 +159,63 @@ class TrayMenu(QObject):
         self._status = menu.addAction("")
         self._status.setEnabled(False)
         menu.addSeparator()
-        self._wallpaper = self._shortcut(self._check(menu, t("Wallpaper"), runtime.set_wallpaper), "toggle_wallpaper")
+        # Üstte sık kullanılan komutlar, altta gruplar (içerik, duvar kağıdı, ekran koruyucu, ayarlar).
         self._pause = self._shortcut(self._check(menu, t("Pause"), runtime.set_paused), "toggle_pause")
-        self._reload = self._shortcut(menu.addAction(t("Reload Page"), runtime.reload), "reload")
         self._interactive = self._shortcut(self._check(menu, t("Interactive Mode"), runtime.set_interactive),
                                            "toggle_interactive")
-        self._screens = menu.addMenu(t("Screens"))
-        self._sources = menu.addMenu(t("Source"))
-        self._boot = menu.addMenu(t("Boot Script"))
-        self._audio = self._check(menu, t("System Audio"), runtime.set_system_audio)
-        permissions = menu.addMenu(t("Permissions"))
+        self._reload = self._shortcut(menu.addAction(t("Reload Page"), runtime.reload), "reload")
+        self._start_saver = self._shortcut(menu.addAction("", runtime.start_screensaver), "screensaver_now")
+        menu.addSeparator()
+
+        content = self._content = menu.addMenu(t("Content"))
+        self._source_actions = []
+        self._sources_end = content.addSeparator()  # kaynak listesi bunun önüne kurulur
+        self._next_source = self._shortcut(content.addAction(t("Next Source"), runtime.next_source), "next_source")
+        content.addAction(t("Add URL…"), self._add_url)
+        content.addAction(t("Add Folder…"), self._add_folder)
+        self._remove_sources = content.addMenu(t("Remove Source"))
+        content.addSeparator()
+        self._boot = content.addMenu(t("Boot Script"))
+
+        wallpaper = self._wallpaper_menu = menu.addMenu(t("Wallpaper"))
+        self._wallpaper = self._shortcut(self._check(wallpaper, t("Show Wallpaper"), runtime.set_wallpaper),
+                                         "toggle_wallpaper")
+        wallpaper.addSeparator()
+        wallpaper.addAction(t("Screens")).setEnabled(False)
+        self._screen_actions = []
+
+        saver = menu.addMenu(t("Screensaver"))
+        self._saver_state = saver.addAction("")
+        self._saver_state.setEnabled(False)
+        self._lock_state = saver.addAction("")
+        self._lock_state.setEnabled(False)
+        saver.addSeparator()
+        self._saver_stream = self._check(saver, t("Stream to Canard.saver"), runtime.set_saver_stream)
+        fps_menu = saver.addMenu(t("Frame Rate"))
+        self._fps = {}
+        for fps in _FPS_CHOICES:
+            self._fps[fps] = self._check(fps_menu, t("{fps} fps", fps=fps),
+                                         lambda _checked, f=fps: runtime.set_saver_fps(f))
+        saver.addSeparator()
+        self._saver_install = saver.addAction("", self._install_saver)
+        saver.addAction(t("Screensaver Settings…"), self._open_screensaver_settings)
+        saver.addAction(t("Lock Screen Settings…"), self._open_lock_screen_settings)
+
+        settings = menu.addMenu(t("Settings"))
+        self._audio = self._check(settings, t("System Audio"), runtime.set_system_audio)
+        self._engines = {}
+        if len(available_engines()) > 1:
+            engines = settings.addMenu(t("Web Engine"))
+            for name in available_engines():
+                label = LABELS[name] + (f" — {t(_ENGINE_HINTS[name])}" if name in _ENGINE_HINTS else "")
+                self._engines[name] = self._check(engines, label, lambda _checked, n=name: runtime.set_engine(n))
+            engines.addSeparator()
+            note = engines.addAction(t("Content data and settings are kept separately per engine"))
+            note.setEnabled(False)
+        self._languages = settings.addMenu(t("Language"))
+        self._login = self._check(settings, t("Open at Login"), self._set_login_item)
+        settings.addSeparator()
+        permissions = settings.addMenu(t("Permissions"))
         self._permission_rows = {}
         for kind in _PERMISSIONS:
             self._permission_rows[kind] = permissions.addAction("")
@@ -168,29 +224,10 @@ class TrayMenu(QObject):
         for kind, title in _PERMISSIONS.items():
             permissions.addAction(t("Open {permission} Settings…", permission=t(title)),
                                   lambda k=kind: self._open_privacy(k))
+        settings.addAction(t("Open Log Folder"), self._open_logs)
+
         menu.addSeparator()
-        self._start_saver = self._shortcut(menu.addAction("", runtime.start_screensaver), "screensaver_now")
-        saver = menu.addMenu(t("Screensaver"))
-        self._saver_state = saver.addAction("")
-        self._saver_state.setEnabled(False)
-        self._lock_state = saver.addAction("")
-        self._lock_state.setEnabled(False)
-        self._saver_install = saver.addAction("", self._install_saver)
-        saver.addAction(t("Screensaver Settings…"), self._open_screensaver_settings)
-        saver.addAction(t("Lock Screen Settings…"), self._open_lock_screen_settings)
-        saver.addSeparator()
-        self._saver_stream = self._check(saver, t("Stream to Canard.saver"), runtime.set_saver_stream)
-        fps_menu = saver.addMenu(t("Frame Rate"))
-        self._fps = {}
-        for fps in _FPS_CHOICES:
-            self._fps[fps] = self._check(fps_menu, t("{fps} fps", fps=fps),
-                                         lambda _checked, f=fps: runtime.set_saver_fps(f))
-        menu.addSeparator()
-        self._login = self._check(menu, t("Open at Login"), self._set_login_item)
-        self._languages = menu.addMenu(t("Language"))
-        menu.addAction(t("Open Log Folder"), self._open_logs)
         menu.addAction(t("About Canard"), self._about)
-        menu.addSeparator()
         menu.addAction(t("Quit Canard"), QApplication.quit)
         menu.aboutToShow.connect(self._refresh_system)
         self._tray.setContextMenu(menu)
@@ -240,6 +277,7 @@ class TrayMenu(QObject):
         store.set("saver.enabled", runtime.saver_stream)
         store.set("saver.fps", runtime.saver_fps)
         store.set("tray.disabled_screens", sorted(runtime.disabled_screens))
+        store.set(ENGINE_KEY, runtime.engine.name)
         store.save()
         self._refresh()
 
@@ -249,6 +287,8 @@ class TrayMenu(QObject):
         parts = [t("wallpaper on") if runtime.wallpaper else t("wallpaper off"),
                  f"{source.name} ({_type_label(source.type)})" if source else t("no source"),
                  t("stream on") if runtime.saver_stream else t("stream off")]
+        if self._engines:
+            parts.append(runtime.engine.label)
         if runtime.paused:
             parts.insert(1, t("⏸ paused"))
         if self._permission_problem():
@@ -261,6 +301,8 @@ class TrayMenu(QObject):
         self._interactive.setChecked(runtime.interactive and runtime.wallpaper)
         self._interactive.setEnabled(runtime.wallpaper and runtime.running)
         self._audio.setChecked(runtime.system_audio)
+        for name, action in self._engines.items():
+            action.setChecked(name == runtime.engine.name)
         self._saver_stream.setChecked(runtime.saver_stream)
         for fps, action in self._fps.items():
             action.setChecked(fps == runtime.saver_fps)
@@ -299,8 +341,8 @@ class TrayMenu(QObject):
 
     def _rebuild_screens(self) -> None:
         # Kapatılıp şu an bağlı olmayan ekranlar da listede kalır ki yeniden açılabilsin.
-        menu = self._screens
-        _clear(menu)
+        menu = self._wallpaper_menu
+        _remove(menu, self._screen_actions)
         disabled = self._runtime.disabled_screens
         connected = [screen.name() for screen in QApplication.instance().screens()]
         primary = QApplication.instance().primaryScreen()
@@ -315,29 +357,29 @@ class TrayMenu(QObject):
             action.setChecked(name not in disabled)
             action.triggered.connect(
                 lambda checked, n=name: self._run(self._runtime.set_screen_enabled, n, checked))
+            self._screen_actions.append(action)
 
     def _rebuild_sources(self) -> None:
-        menu = self._sources
-        _clear(menu)
+        menu = self._content
+        _remove(menu, self._source_actions)
         active = self._runtime.source
         sources = self._app.registry.list()
         for source in sources:
-            action = menu.addAction(f"{source.name} ({_type_label(source.type)})")
+            action = QAction(f"{source.name} ({_type_label(source.type)})", menu)
             action.setCheckable(True)
             action.setChecked(active is not None and source.id == active.id)
             action.setToolTip(source.url or source.path or "")
             action.triggered.connect(lambda _checked, s=source: self._run(self._open_source, s))
-        if sources:
-            menu.addSeparator()
-        menu.addAction(t("Add URL…"), self._add_url)
-        menu.addAction(t("Add Folder…"), self._add_folder)
-        if sources:
-            self._shortcut(menu.addAction(t("Next Source"), self._runtime.next_source), "next_source").setEnabled(
-                len(sources) > 1)
-            remove = menu.addMenu(t("Remove Source"))
-            for source in sources:
-                remove.addAction(source.name).triggered.connect(
-                    lambda _checked, s=source: self._run(self._remove_source, s))
+            menu.insertAction(self._sources_end, action)
+            self._source_actions.append(action)
+        self._sources_end.setVisible(bool(sources))
+        self._next_source.setEnabled(len(sources) > 1)
+        remove = self._remove_sources
+        _clear(remove)
+        remove.menuAction().setEnabled(bool(sources))
+        for source in sources:
+            remove.addAction(source.name).triggered.connect(
+                lambda _checked, s=source: self._run(self._remove_source, s))
 
     def _rebuild_boot(self) -> None:
         menu = self._boot
@@ -498,15 +540,11 @@ class TrayMenu(QObject):
 
     def _about(self) -> None:
         self._front()
-        try:
-            from PySide6.QtWebEngineCore import qWebEngineChromiumVersion
-
-            chromium = f" · Chromium {qWebEngineChromiumVersion()}"
-        except ImportError:
-            chromium = ""
+        engine = self._runtime.engine
         folders = (
             (t("Settings"), "", Path(self._app.settings_path)),
-            (t("Content data"), " " + t("(localStorage, IndexedDB, cookies)"), web_data_location()),
+            (t("Content data ({engine})", engine=engine.label), " " + t("(localStorage, IndexedDB, cookies)"),
+             engine.data_location()),
             (t("Logs"), "", logs.default_log_path().parent),
         )
         rows = "".join(f"<b>{title}</b>{detail}<br>{_folder_link(path)}<br>" for title, detail, path in folders)
@@ -519,12 +557,13 @@ class TrayMenu(QObject):
         box.setInformativeText(
             t("Runs web content as a live wallpaper and screensaver.") + "<br><br>"
             f'<a href="{_REPO_URL}">{_REPO_URL.removeprefix("https://")}</a> · {t("License")}: GNU GPL v3<br>'
-            f"<small>Python {platform.python_version()} · Qt {qVersion()}{chromium}</small><br><br>"
+            f"<small>Python {platform.python_version()} · Qt {qVersion()} · {html.escape(engine.version())}"
+            "</small><br><br>"
             + t("Canard collects no data; everything stays on this computer.")
             + f' <a href="{_PRIVACY_URL}">{t("Details")}</a><br><br>'
             f"{rows}<br><small>"
-            + t("All sources share one web profile; data is kept separate per site address (origin). "
-                "Removing a source from the list does not delete its data.")
+            + t("All sources share one web profile per engine; data is kept separate per site address (origin). "
+                "Each engine has its own data. Removing a source from the list does not delete its data.")
             + "</small>")
         box.exec()
 

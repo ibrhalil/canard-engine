@@ -14,12 +14,12 @@ dependencies = [
     { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-screencapturekit", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-videotoolbox", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-webkit", marker = "sys_platform == 'darwin'" },
     { name = "pyside6" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "pyobjc-framework-webkit", marker = "sys_platform == 'darwin'" },
     { name = "pytest" },
 ]
 
@@ -32,14 +32,12 @@ requires-dist = [
     { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'", specifier = ">=10" },
     { name = "pyobjc-framework-screencapturekit", marker = "sys_platform == 'darwin'", specifier = ">=10" },
     { name = "pyobjc-framework-videotoolbox", marker = "sys_platform == 'darwin'", specifier = ">=10" },
+    { name = "pyobjc-framework-webkit", marker = "sys_platform == 'darwin'", specifier = ">=10" },
     { name = "pyside6", specifier = ">=6.9,<7" },
 ]
 
 [package.metadata.requires-dev]
-dev = [
-    { name = "pyobjc-framework-webkit", marker = "sys_platform == 'darwin'", specifier = ">=10" },
-    { name = "pytest", specifier = ">=9.2.0" },
-]
+dev = [{ name = "pytest", specifier = ">=9.2.0" }]
 
 [[package]]
 name = "colorama"

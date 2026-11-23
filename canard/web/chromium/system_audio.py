@@ -2,9 +2,8 @@ from functools import cache
 from pathlib import Path
 
 from PySide6.QtCore import QFile, QIODevice
-from PySide6.QtWebEngineCore import QWebEngineScript
 
-from canard.web.bridge import remove_scripts
+from canard.web.chromium import scripts
 
 _SHIM = Path(__file__).with_name("system_audio.js")
 SCRIPT_NAME = "canard-system-audio"
@@ -27,15 +26,8 @@ def script_source() -> str:
 
 
 def install(profile) -> None:
-    uninstall(profile)
-    script = QWebEngineScript()
-    script.setName(SCRIPT_NAME)
-    script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
-    script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-    script.setRunsOnSubFrames(False)
-    script.setSourceCode(script_source())
-    profile.scripts().insert(script)
+    scripts.install(profile, SCRIPT_NAME, script_source())
 
 
 def uninstall(profile) -> None:
-    remove_scripts(profile, SCRIPT_NAME)
+    scripts.remove(profile, SCRIPT_NAME)

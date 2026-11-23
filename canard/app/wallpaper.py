@@ -10,7 +10,7 @@ from PySide6.QtGui import QGuiApplication, QPalette
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from canard.platform.base import detect
-from canard.web.engine import WebHost
+from canard.web.base import WebEngine, WebHost, unload_pages
 
 log = logging.getLogger("canard.wallpaper")
 screen_log = logging.getLogger("canard.screen")
@@ -43,12 +43,12 @@ class WallpaperManager(QObject):
     interactiveChanged = Signal(bool)
     pausedChanged = Signal(bool)
 
-    def __init__(self, profile, url: str, boot_script: str | None = None,
+    def __init__(self, engine: WebEngine, url: str, boot_script: str | None = None,
                  interactive: bool = False, audio_hub=None, show_wallpaper: bool = True, parent=None):
         super().__init__(parent)
         self._show_wallpaper = show_wallpaper  # False: yalnız ekran koruyucu, pencereler gizli ve dondurulmuş
         self._screensaver = False
-        self._profile = profile
+        self._engine = engine
         self._audio_hub = audio_hub
         self._url = url
         self._boot_script = boot_script
@@ -94,12 +94,27 @@ class WallpaperManager(QObject):
     def close(self) -> None:
         self._sync_timer.stop()
         self._park_timer.stop()
+        self._destroy_all()
+
+    def _destroy_all(self) -> None:
+        unload_pages([entry.host for entry in self._windows]
+                     + [entry.host for entry, _since in self._parked.values()])
         for entry in self._windows:
             self._destroy(entry, immediate=True)
         for entry, _since in self._parked.values():
             self._destroy(entry, immediate=True)
         self._windows.clear()
         self._parked.clear()
+        self._parked_hosts.clear()
+        self._streaming.clear()
+        self._refreshing.clear()
+
+    def set_engine(self, engine: WebEngine) -> None:
+        """Tüm sayfalar kapatılıp yeni motorla yeniden açılır (Canard.saver bağlantıları önceden kapatılmalı).
+        Eski motor bundan sonra kapatılabilir: sayfaları silinmiştir."""
+        self._engine = engine
+        self._destroy_all()
+        self._sync_screens()
 
     def load(self, url: str, boot_script: str | None = None) -> None:
         self._url = url
@@ -263,7 +278,7 @@ class WallpaperManager(QObject):
         palette = window.palette()
         palette.setColor(QPalette.ColorRole.Window, Qt.GlobalColor.black)
         window.setPalette(palette)
-        host = WebHost(self._profile, boot_script=self._boot_script, audio_hub=self._audio_hub)
+        host = self._engine.create_host(boot_script=self._boot_script, audio_hub=self._audio_hub)
         layout = QVBoxLayout(window)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(host)

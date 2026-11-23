@@ -19,7 +19,7 @@ from PySide6.QtQuickWidgets import QQuickWidget
 from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineScript, QWebEngineSettings
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
-from canard.web.engine import WebHost
+from canard.web.chromium.engine import ChromiumHost as WebHost
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -48,7 +48,7 @@ def _document_script(name: str, source: str) -> QWebEngineScript:
 
 
 def make_profile(prelude: str | None = None) -> QWebEngineProfile:
-    # canard.web.engine.create_profile ile aynı ayarlar, ayrı depolama.
+    # canard.web.chromium.engine.create_profile ile aynı ayarlar, ayrı depolama.
     profile = QWebEngineProfile("canard-bench")
     profile.setPersistentStoragePath(str(ROOT / "build" / "engine-bench" / "qt-profile"))
     profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies)
@@ -135,7 +135,7 @@ def main() -> int:
     if args.system_audio:
         from canard.audio.hub import SystemAudioHub
         from canard.platform.base import detect
-        from canard.web import system_audio
+        from canard.web.chromium import system_audio
 
         audio_hub = SystemAudioHub(detect(), app)
         system_audio.install(profile)

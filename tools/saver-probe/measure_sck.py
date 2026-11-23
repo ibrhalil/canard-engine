@@ -151,7 +151,7 @@ def main() -> int:
     app = QApplication(sys.argv[:1])
     adapter = base.detect()
     profile = base.create_profile(persistent=False)
-    base.HostBridge("wallpaper", None, True).install(profile)
+    base.install_bridge(profile)
     hub = base.SystemAudioHub(adapter, app)
     base.system_audio.install(profile)
     boot = None if args.no_boot else (base.ROOT / "tools" / "mscillus-boot-system.js").read_text(encoding="utf-8")

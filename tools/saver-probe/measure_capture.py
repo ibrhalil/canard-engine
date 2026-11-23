@@ -33,9 +33,14 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from canard.audio.hub import SystemAudioHub  # noqa: E402
 from canard.platform.base import detect  # noqa: E402
-from canard.web import system_audio  # noqa: E402
 from canard.web.bridge import HostBridge  # noqa: E402
-from canard.web.engine import WebHost, create_profile  # noqa: E402
+from canard.web.chromium import scripts, system_audio  # noqa: E402
+from canard.web.chromium.engine import BRIDGE_SCRIPT, create_profile  # noqa: E402
+from canard.web.chromium.engine import ChromiumHost as WebHost  # noqa: E402
+
+
+def install_bridge(profile) -> None:
+    scripts.install(profile, BRIDGE_SCRIPT, HostBridge("wallpaper", None, True, "chromium").script_source())
 
 _cv = ctypes.CDLL(ctypes.util.find_library("CoreVideo"))
 _cv.CVPixelBufferGetBaseAddress.restype = ctypes.c_void_p
@@ -229,7 +234,7 @@ def main() -> int:
     app = QApplication(sys.argv[:1])
     adapter = detect()
     profile = create_profile(persistent=False)
-    HostBridge("wallpaper", None, True).install(profile)
+    install_bridge(profile)
     hub = SystemAudioHub(adapter, app)
     system_audio.install(profile)
     boot = None if args.no_boot else (ROOT / "tools" / "mscillus-boot-system.js").read_text(encoding="utf-8")

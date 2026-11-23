@@ -6,11 +6,15 @@ from pathlib import Path
 SETTINGS_VERSION = 1
 
 
-def default_settings_path() -> Path:
+def data_location() -> Path:
+    """Canard'ın veri klasörü (macOS: ~/Library/Application Support/Canard)."""
     from PySide6.QtCore import QStandardPaths
 
-    base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
-    return Path(base) / "settings.json"
+    return Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation))
+
+
+def default_settings_path() -> Path:
+    return data_location() / "settings.json"
 
 
 class SettingsStore:

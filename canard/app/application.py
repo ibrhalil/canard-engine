@@ -17,8 +17,9 @@ from canard.content.server import ServerManager
 from canard.content.sources import SourceError, SourceRegistry, resolve_load_url
 from canard.i18n import t
 from canard.platform.base import detect
+from canard.web import create_engine, default_engine
+from canard.web.base import unload_pages
 from canard.web.bridge import HostBridge
-from canard.web.engine import WebHost, create_profile
 
 source_log = logging.getLogger("canard.source")
 
@@ -45,7 +46,7 @@ class CanardApp:
 
     def run(self, source, mode: str = "preview", interactive: bool = False, system_audio: bool = True,
             screensaver_after: float | None = None, saver_stream: bool = True,
-            saver_fps: int | None = None, tray: bool = False) -> int:
+            saver_fps: int | None = None, tray: bool = False, engine: str | None = None) -> int:
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
         try:
             detect().before_gui()
@@ -73,10 +74,11 @@ class CanardApp:
         keepalive.timeout.connect(lambda: None)
         keepalive.start(250)
 
-        profile = create_profile()
+        web_engine = create_engine(engine or default_engine())
+        logging.getLogger("canard.web").info("web engine: %s (%s)", web_engine.label, web_engine.version())
         runtime = window = menu = None
         if mode == "preview" and not tray:
-            window = self._preview(app, profile, source, system_audio)
+            window = self._preview(app, web_engine, source, system_audio)
         else:
             app.setQuitOnLastWindowClosed(False)
             from canard.app.runtime import Runtime
@@ -84,10 +86,10 @@ class CanardApp:
             if tray:
                 from canard.app.tray import TrayMenu, runtime_options
 
-                runtime = Runtime(self, profile, **runtime_options(self.store))
+                runtime = Runtime(self, web_engine, **runtime_options(self.store))
                 menu = TrayMenu(self, runtime)
             else:
-                runtime = Runtime(self, profile, wallpaper=mode == "wallpaper", interactive=interactive,
+                runtime = Runtime(self, web_engine, wallpaper=mode == "wallpaper", interactive=interactive,
                                   system_audio=system_audio, saver_stream=saver_stream, saver_fps=saver_fps,
                                   screensaver_after=screensaver_after)
             if source is not None:
@@ -101,12 +103,13 @@ class CanardApp:
         code = app.exec()
         if menu is not None:
             menu.close()
-        # Sayfalar profilden önce silinmeli; yoksa profil (localStorage, çerezler) diske düzgün yazılmayabilir.
+        # Sayfalar motordan önce silinmeli; yoksa Chromium profili (localStorage, çerezler) diske düzgün yazılmayabilir.
         if runtime is not None:
-            runtime.close()
+            runtime.close()  # Runtime motoru da kapatır (menüden değiştirilmiş olabilir)
         if window is not None:
+            unload_pages([window.centralWidget()])
             shiboken6.delete(window)
-        shiboken6.delete(profile)
+            web_engine.close()
         self.servers.stop_all()
         return code
 
@@ -123,21 +126,19 @@ class CanardApp:
             app.installTranslator(translator)
             self._qt_translator = translator
 
-    def _preview(self, app, profile, source, system_audio: bool):
+    def _preview(self, app, engine, source, system_audio: bool):
         url = self.resolve(source)
-        bridge = HostBridge(mode="preview", source=source.to_dict(), system_audio=system_audio)
-        bridge.install(profile)
+        bridge = HostBridge(mode="preview", source=source.to_dict(), system_audio=system_audio, renderer=engine.name)
+        engine.set_scripts(bridge.script_source(), system_audio)
         audio_hub = None
         if system_audio:
             from canard.audio.hub import SystemAudioHub
-            from canard.web import system_audio as system_audio_script
 
             audio_hub = SystemAudioHub(detect(), app)
-            system_audio_script.install(profile)
             app.aboutToQuit.connect(audio_hub.shutdown)
-        host = WebHost(profile, boot_script=source.boot_script, audio_hub=audio_hub)
+        host = engine.create_host(boot_script=source.boot_script, audio_hub=audio_hub)
         window = QMainWindow()
-        window.setWindowTitle("Canard — preview")
+        window.setWindowTitle(f"Canard — preview ({engine.label})")
         window.setCentralWidget(host)
         window.resize(1280, 800)
         host.load(url)

@@ -11,8 +11,8 @@ from canard.audio.hub import SystemAudioHub
 from canard.content.sources import SourceError
 from canard.i18n import t
 from canard.platform.base import detect
-from canard.web import policy
-from canard.web import system_audio as system_audio_script
+from canard.web import create_engine
+from canard.web.base import WebEngine, media_listeners
 from canard.web.bridge import HostBridge
 
 log = logging.getLogger("canard.runtime")
@@ -23,12 +23,12 @@ class Runtime(QObject):
     error = Signal(str)  # kısayolla tetiklenen eylem başarısız olunca (menü çubuğu iletişim kutusuyla gösterir)
     permission_needed = Signal(str)  # "system_audio" | "microphone": içerik istedi ama macOS izni kapalı
 
-    def __init__(self, app, profile, *, wallpaper: bool = True, interactive: bool = False,
+    def __init__(self, app, engine: WebEngine, *, wallpaper: bool = True, interactive: bool = False,
                  system_audio: bool = True, saver_stream: bool = True, saver_fps: int | None = None,
                  screensaver_after: float | None = None, disabled_screens=(), parent=None):
         super().__init__(parent)
         self._app = app  # CanardApp
-        self._profile = profile
+        self._engine = engine  # Runtime'ındır: close() ve set_engine() kapatır
         self._adapter = detect()
         self.wallpaper = wallpaper
         self.interactive = interactive
@@ -44,11 +44,15 @@ class Runtime(QObject):
         self._audio_hub = SystemAudioHub(self._adapter, self)
         self._audio_hub.started.connect(lambda: self._check_permission("system_audio"))
         self.mic_requested = False
-        policy.media_listeners.append(self._on_media_request)
+        media_listeners.append(self._on_media_request)
         self._manager = None
         self._stream = None
         self._screensaver = None
         self._install_scripts()
+
+    @property
+    def engine(self) -> WebEngine:
+        return self._engine
 
     @property
     def running(self) -> bool:
@@ -146,6 +150,27 @@ class Runtime(QObject):
         log.info("system audio bridge %s", "on" if enabled else "off")
         self.changed.emit()
 
+    def set_engine(self, name: str) -> None:
+        """Web motorunu değiştirir: sayfalar yeni motorla yeniden açılır. İçerik verileri (localStorage vb.) motorlar
+        arasında taşınmaz. Açılamazsa önceki motor sürer, hata `error` ile bildirilir."""
+        if name == self._engine.name:
+            return
+        try:
+            engine = create_engine(name)
+        except Exception as error:
+            log.error("web engine %s could not be started: %s", name, error, exc_info=True)
+            self.error.emit(t("Could not switch the web engine: {error}", error=error))
+            return
+        previous, self._engine = self._engine, engine
+        if self._stream is not None:
+            self._stream.drop_sessions()  # yayınlanan sayfalar kapanacak; Canard.saver yeniden bağlanır
+        self._install_scripts()
+        if self._manager is not None:
+            self._manager.set_engine(engine)
+        previous.close()
+        log.info("web engine: %s (%s)", engine.label, engine.version())
+        self.changed.emit()
+
     def set_saver_stream(self, enabled: bool) -> None:
         self.saver_stream = enabled and sys.platform == "darwin"
         if self._stream is not None:
@@ -193,8 +218,8 @@ class Runtime(QObject):
             QTimer.singleShot(8000, lambda: self._check_permission(kind, retry=False))
 
     def close(self) -> None:
-        if self._on_media_request in policy.media_listeners:
-            policy.media_listeners.remove(self._on_media_request)
+        if self._on_media_request in media_listeners:
+            media_listeners.remove(self._on_media_request)
         if self._stream is not None:
             self._stream.close()
             self._stream = None
@@ -205,19 +230,17 @@ class Runtime(QObject):
         if self._manager is not None:
             self._manager.close()
             self._manager = None
+        self._engine.close()  # sayfalardan sonra
 
     def _install_scripts(self) -> None:
         mode = "wallpaper" if self.wallpaper else "screensaver"
         source = self.source.to_dict() if self.source else None
-        HostBridge(mode=mode, source=source, system_audio=self.system_audio).install(self._profile)
-        if self.system_audio:
-            system_audio_script.install(self._profile)
-        else:
-            system_audio_script.uninstall(self._profile)
+        bridge = HostBridge(mode=mode, source=source, system_audio=self.system_audio, renderer=self._engine.name)
+        self._engine.set_scripts(bridge.script_source(), self.system_audio)
 
     def _start(self) -> None:
         manager = self._manager = WallpaperManager(
-            self._profile, self.url, boot_script=self.source.boot_script, interactive=self.interactive,
+            self._engine, self.url, boot_script=self.source.boot_script, interactive=self.interactive,
             audio_hub=self._audio_hub, show_wallpaper=self.wallpaper, parent=self)
         manager.set_disabled_screens(self.disabled_screens)
         manager.interactiveChanged.connect(self._on_interactive)

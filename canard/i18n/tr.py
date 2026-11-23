@@ -5,9 +5,13 @@ CATALOG = {
     "Reload Page": "Sayfayı yeniden yükle",
     "Interactive Mode": "Etkileşimli mod",
     "Screens": "Ekranlar",
-    "Source": "Kaynak",
+    "Content": "İçerik",
+    "Show Wallpaper": "Duvar kağıdını göster",
     "Boot Script": "Başlangıç betiği",
     "System Audio": "Sistem sesi",
+    "Web Engine": "Web motoru",
+    "system engine, uses less power": "sistemin motoru, daha az enerji",
+    "Content data and settings are kept separately per engine": "İçerik verileri ve ayarları her motorda ayrı tutulur",
     "Permissions": "İzinler",
     "Open {permission} Settings…": "{permission} izin ayarlarını aç…",
     "System Audio Recording": "Sistem sesi kaydı",
@@ -77,6 +81,7 @@ CATALOG = {
     "Could not install Canard.saver: {error}": "Canard.saver kurulamadı: {error}",
     "Could not open source: {error}": "Kaynak açılamadı: {error}",
     "Could not open source ({name}): {error}": "Kaynak açılamadı ({name}): {error}",
+    "Could not switch the web engine: {error}": "Web motoru değiştirilemedi: {error}",
     "Canard can't hear system audio": "Canard sistem sesini duyamıyor",
     "The \"Screen & System Audio Recording\" permission is off for Canard, so the visualizer won't react to music."
     "\n\nTurn on Canard in System Settings › Privacy & Security › Screen & System Audio Recording, under \"System "
@@ -99,13 +104,13 @@ CATALOG = {
     "Canard collects no data; everything stays on this computer.": "Canard veri toplamaz; her şey bu bilgisayarda kalır.",
     "Details": "Ayrıntılar",
     "Settings": "Ayarlar",
-    "Content data": "İçerik verileri",
+    "Content data ({engine})": "İçerik verileri ({engine})",
     "(localStorage, IndexedDB, cookies)": "(localStorage, IndexedDB, çerezler)",
     "Logs": "Loglar",
-    "All sources share one web profile; data is kept separate per site address (origin). Removing a source from the "
-    "list does not delete its data.":
-        "Tüm kaynaklar tek web profilini paylaşır; veriler kaynağın adresine (origin) göre ayrıdır. Kaynağı listeden "
-        "kaldırmak verilerini silmez.",
+    "All sources share one web profile per engine; data is kept separate per site address (origin). Each engine has "
+    "its own data. Removing a source from the list does not delete its data.":
+        "Tüm kaynaklar motor başına tek web profilini paylaşır; veriler kaynağın adresine (origin) göre ayrıdır. Her "
+        "motorun verileri ayrıdır. Kaynağı listeden kaldırmak verilerini silmez.",
     # İçerik
     "Content could not be loaded:\n{url}": "İçerik yüklenemedi:\n{url}",
     "Retry": "Yeniden Dene",
@@ -147,6 +152,8 @@ CATALOG = {
     "Wallpaper receives mouse input (interactive mode)": "Duvar kağıdı fare olaylarını alsın (etkileşimli mod)",
     "JS file to run when the page loads (boot script)": "Sayfa yüklendiğinde çalışacak JS dosyası (boot script)",
     "Remove the boot script of the source": "Kaynağa bağlı boot script'i kaldır",
+    "Web engine for this run (default: menu setting, otherwise {default}); content data is kept separately per engine":
+        "Bu çalıştırmanın web motoru (varsayılan: menüdeki ayar, yoksa {default}); içerik verileri her motorda ayrıdır",
     "Do not give system audio to the content (disables the getDisplayMedia audio bridge)":
         "Sistem sesini içeriğe verme (getDisplayMedia ses köprüsünü kapat)",
     "MIN": "DK",
